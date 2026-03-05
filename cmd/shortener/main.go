@@ -8,18 +8,20 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/sastromikus/pip_shortener/internal/handler"
+	"github.com/sastromikus/pip_shortener/internal/repository"
+	"github.com/sastromikus/pip_shortener/internal/service"
 )
 
-type badRequestHandler struct{}
-
-func (badRequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusBadRequest)
-}
-
 func main() {
+	repo := repository.NewMemoryRepository()
+	svc := service.NewShortener(repo)
+	router := handler.NewRouter(svc)
+
 	srv := &http.Server{
 		Addr:              ":8080",
-		Handler:           badRequestHandler{},
+		Handler:           router,
 	}
 
 	go func() {
