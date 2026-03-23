@@ -7,41 +7,36 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/sastromikus/pip_shortener/internal/service"
 )
 
-const maxPOSTBody = 8 << 10
+const maxPOSTBody = 8 << 10 
 
-type Router struct {
-	svc *service.Shortener
-}
+func NewRouter(svc *service.Shortener) http.Handler {
+	r := chi.NewRouter()
 
-func NewRouter(svc *service.Shortener) *Router {
-	return &Router{svc: svc}
-}
-
-func (h *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodPost:
-		if r.URL.Path != "/" {
-			badRequest(w)
-			return
-		}
-		h.handleShorten(w, r)
-
-	case http.MethodGet:
-		if r.URL.Path == "/" {
-			badRequest(w)
-			return
-		}
-		h.handleRedirect(w, r)
-
-	default:
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		badRequest(w)
-	}
+	})
+	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
+		badRequest(w)
+	})
+
+	r.Post("/", func(w http.ResponseWriter, r *http.Request) {
+		handleShorten(svc, w, r)
+	})
+
+	r.Get("/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		handleRedirect(svc, id, w, r)
+	})
+
+	return r
 }
 
-func (h *Router) handleShorten(w http.ResponseWriter, r *http.Request) {
+func handleShorten(svc *service.Shortener, w http.ResponseWriter, r *http.Request) {
 	ct := r.Header.Get("Content-Type")
 	if ct == "" || !strings.HasPrefix(strings.ToLower(ct), "text/plain") {
 		badRequest(w)
@@ -60,7 +55,7 @@ func (h *Router) handleShorten(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id, err := h.svc.Shorten(raw)
+	id, err := svc.Shorten(raw)
 	if err != nil {
 		badRequest(w)
 		return
@@ -73,19 +68,14 @@ func (h *Router) handleShorten(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(shortURL))
 }
 
-func (h *Router) handleRedirect(w http.ResponseWriter, r *http.Request) {
-	if strings.Count(r.URL.Path, "/") != 1 {
-		badRequest(w)
-		return
-	}
-
-	id := strings.TrimPrefix(r.URL.Path, "/")
+func handleRedirect(svc *service.Shortener, id string, w http.ResponseWriter, r *http.Request) {
+	id = strings.TrimSpace(id)
 	if id == "" || strings.ContainsAny(id, " \t\r\n") {
 		badRequest(w)
 		return
 	}
 
-	original, ok := h.svc.Resolve(id)
+	original, ok := svc.Resolve(id)
 	if !ok {
 		badRequest(w)
 		return
