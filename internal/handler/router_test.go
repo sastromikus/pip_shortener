@@ -122,8 +122,12 @@ func TestInvalidRequests_Return400(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
 			h.ServeHTTP(w, tt.req)
-			if w.Result().StatusCode != http.StatusBadRequest {
-				t.Fatalf("expected 400, got %d", w.Result().StatusCode)
+
+			res := w.Result()
+			res.Body.Close()
+
+			if res.StatusCode != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d", res.StatusCode)
 			}
 		})
 	}
