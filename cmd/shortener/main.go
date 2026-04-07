@@ -9,23 +9,25 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sastromikus/pip_shortener/internal/config"
 	"github.com/sastromikus/pip_shortener/internal/handler"
 	"github.com/sastromikus/pip_shortener/internal/repository"
 	"github.com/sastromikus/pip_shortener/internal/service"
 )
 
 func main() {
+	cfg := config.Parse()
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
-	router := handler.NewRouter(svc)
+	router := handler.NewRouter(svc, cfg.BaseURL)
 
 	srv := &http.Server{
-		Addr:              ":8080",
-		Handler:           router,
+	    Addr: cfg.ServerAddr,
+	    Handler: router,
 	}
 
 	go func() {
-		log.Println("listening")
+		log.Printf("listening on http://%s\n", cfg.ServerAddr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("error: %v", err)
 		}
