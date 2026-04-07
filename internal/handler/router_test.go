@@ -14,7 +14,7 @@ import (
 func TestPOST_Shorten_Returns201AndShortURL(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
-	h := NewRouter(svc)
+	h := NewRouter(svc, "http://localhost:8080")
 
 	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/", strings.NewReader("https://practicum.yandex.ru/"))
 	req.Header.Set("Content-Type", "text/plain")
@@ -54,7 +54,7 @@ func TestPOST_Shorten_Returns201AndShortURL(t *testing.T) {
 func TestGET_Redirect_Returns307AndLocation(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
-	h := NewRouter(svc)
+	h := NewRouter(svc, "http://localhost:8080")
 
 	const id = "TESTID12"
 	const original = "https://example.com/path"
@@ -78,7 +78,7 @@ func TestGET_Redirect_Returns307AndLocation(t *testing.T) {
 func TestInvalidRequests_Return400(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
-	h := NewRouter(svc)
+	h := NewRouter(svc, "http://localhost:8080")
 
 	tests := []struct {
 		name string
