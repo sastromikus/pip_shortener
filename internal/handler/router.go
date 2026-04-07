@@ -2,7 +2,6 @@ package handler
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -14,18 +13,16 @@ import (
 
 const maxPOSTBody = 8 << 10 
 
-func NewRouter(svc *service.Shortener) http.Handler {
+func NewRouter(svc *service.Shortener, baseURL string) http.Handler {
+	baseURL = strings.TrimRight(baseURL, "/")
+
 	r := chi.NewRouter()
 
-	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
-		badRequest(w)
-	})
-	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
-		badRequest(w)
-	})
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) { badRequest(w) })
+	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) { badRequest(w) })
 
 	r.Post("/", func(w http.ResponseWriter, r *http.Request) {
-		handleShorten(svc, w, r)
+		handleShorten(svc, baseURL, w, r)
 	})
 
 	r.Get("/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -36,7 +33,7 @@ func NewRouter(svc *service.Shortener) http.Handler {
 	return r
 }
 
-func handleShorten(svc *service.Shortener, w http.ResponseWriter, r *http.Request) {
+func handleShorten(svc *service.Shortener, baseURL string, w http.ResponseWriter, r *http.Request) {
 	ct := r.Header.Get("Content-Type")
 	if ct == "" || !strings.HasPrefix(strings.ToLower(ct), "text/plain") {
 		badRequest(w)
@@ -61,7 +58,7 @@ func handleShorten(svc *service.Shortener, w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	shortURL := fmt.Sprintf("http://localhost:8080/%s", id)
+	shortURL := baseURL + "/" + id
 
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
