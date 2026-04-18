@@ -9,14 +9,18 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/sastromikus/pip_shortener/internal/service"
+
+    "github.com/sirupsen/logrus"
+    "github.com/sastromikus/pip_shortener/internal/handler/middleware"
 )
 
 const maxPOSTBody = 8 << 10 
 
-func NewRouter(svc *service.Shortener, baseURL string) http.Handler {
+func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger) http.Handler {
 	baseURL = strings.TrimRight(baseURL, "/")
 
-	r := chi.NewRouter()
+    r := chi.NewRouter()
+    r.Use(middleware.Logger(logger))
 
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) { badRequest(w) })
 	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) { badRequest(w) })

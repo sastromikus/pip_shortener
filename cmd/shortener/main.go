@@ -13,13 +13,18 @@ import (
 	"github.com/sastromikus/pip_shortener/internal/handler"
 	"github.com/sastromikus/pip_shortener/internal/repository"
 	"github.com/sastromikus/pip_shortener/internal/service"
+
+    "github.com/sirupsen/logrus"
 )
 
 func main() {
 	cfg := config.Parse()
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
-	router := handler.NewRouter(svc, cfg.BaseURL)
+	logger := logrus.New()
+	logger.SetLevel(logrus.InfoLevel)
+
+	router := handler.NewRouter(svc, cfg.BaseURL, logger)
 
 	srv := &http.Server{
 	    Addr: cfg.ServerAddr,
