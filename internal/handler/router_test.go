@@ -9,12 +9,16 @@ import (
 
 	"github.com/sastromikus/pip_shortener/internal/repository"
 	"github.com/sastromikus/pip_shortener/internal/service"
+
+    "github.com/sirupsen/logrus"
 )
 
 func TestPOST_Shorten_Returns201AndShortURL(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
-	h := NewRouter(svc, "http://localhost:8080")
+	logger := logrus.New()
+	logger.SetLevel(logrus.InfoLevel)
+	h := NewRouter(svc, "http://localhost:8080", logger)
 
 	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/", strings.NewReader("https://practicum.yandex.ru/"))
 	req.Header.Set("Content-Type", "text/plain")
@@ -54,7 +58,9 @@ func TestPOST_Shorten_Returns201AndShortURL(t *testing.T) {
 func TestGET_Redirect_Returns307AndLocation(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
-	h := NewRouter(svc, "http://localhost:8080")
+	logger := logrus.New()
+	logger.SetLevel(logrus.InfoLevel)
+	h := NewRouter(svc, "http://localhost:8080", logger)
 
 	const id = "TESTID12"
 	const original = "https://example.com/path"
@@ -78,7 +84,9 @@ func TestGET_Redirect_Returns307AndLocation(t *testing.T) {
 func TestInvalidRequests_Return400(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
-	h := NewRouter(svc, "http://localhost:8080")
+	logger := logrus.New()
+	logger.SetLevel(logrus.InfoLevel)
+	h := NewRouter(svc, "http://localhost:8080", logger)
 
 	tests := []struct {
 		name string
