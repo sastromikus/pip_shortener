@@ -25,8 +25,8 @@ func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger) ht
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) { badRequest(w) })
 	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) { badRequest(w) })
 
-	r.Post("/", func(w http.ResponseWriter, r *http.Request) {
-		handleShorten(svc, baseURL, w, r)
+	r.Post("/api/shorten", func(w http.ResponseWriter, r *http.Request) {
+	    handleAPIPostShortenJSON(svc, baseURL, w, r)
 	})
 
 	r.Get("/{id}", func(w http.ResponseWriter, r *http.Request) {

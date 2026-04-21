@@ -1,6 +1,7 @@
 package handler
 
 import (
+    "encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -139,4 +140,51 @@ func TestInvalidRequests_Return400(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPOST_APIShorten_ReturnsJSON(t *testing.T) {
+    repo := repository.NewMemoryRepository()
+    svc := service.NewShortener(repo)
+
+    baseURL := "http://localhost:8080"
+
+    logger := logrus.New()
+    logger.SetLevel(logrus.InfoLevel)
+
+    h := NewRouter(svc, baseURL, logger)
+
+    body := `{"url":"https://practicum.yandex.ru"}`
+    req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/shorten", strings.NewReader(body))
+    req.Header.Set("Content-Type", "application/json")
+
+    w := httptest.NewRecorder()
+    h.ServeHTTP(w, req)
+
+    res := w.Result()
+    defer res.Body.Close()
+
+    if res.StatusCode != http.StatusCreated {
+        t.Fatalf("expected %d, got %d", http.StatusCreated, res.StatusCode)
+    }
+
+    ct := res.Header.Get("Content-Type")
+    if !strings.HasPrefix(strings.ToLower(ct), "application/json") {
+        t.Fatalf("expected application/json, got %q", ct)
+    }
+
+    b, err := io.ReadAll(res.Body)
+    if err != nil {
+        t.Fatalf("read body: %v", err)
+    }
+
+    var out struct {
+        Result string `json:"result"`
+    }
+    if err := json.Unmarshal(b, &out); err != nil {
+        t.Fatalf("unmarshal: %v; body=%q", err, string(b))
+    }
+
+    if !strings.HasPrefix(out.Result, baseURL+"/") {
+        t.Fatalf("expected result to start with %q, got %q", baseURL+"/", out.Result)
+    }
 }
