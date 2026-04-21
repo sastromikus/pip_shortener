@@ -9,7 +9,7 @@ import (
 )
 
 type apiShortenRequest struct {
-	URL string `json:"url"`
+    URL string `json:"url"`
 }
 
 type apiShortenResponse struct {
@@ -23,15 +23,14 @@ func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, w http.Res
 		return
 	}
 
-	var req apiShortenRequest
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&req); err != nil {
+	body, err := readBody(r, maxPOSTBody)
+	if err != nil {
 		badRequest(w)
 		return
 	}
 
-	if dec.More() {
+	var req apiShortenRequest
+	if err := json.Unmarshal(body, &req); err != nil {
 		badRequest(w)
 		return
 	}
@@ -53,7 +52,5 @@ func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, w http.Res
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-
-	enc := json.NewEncoder(w)
-	_ = enc.Encode(resp)
+	_ = json.NewEncoder(w).Encode(resp)
 }
