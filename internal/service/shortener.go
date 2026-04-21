@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"net/url"
+	"strings"
 )
 
 const (
@@ -26,6 +27,15 @@ func NewShortener(repo URLRepository) *Shortener {
 }
 
 func (s *Shortener) Shorten(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", errors.New("empty url")
+	}
+
+	if !strings.Contains(raw, "://") {
+		raw = "http://" + raw
+	}
+
 	if err := validateURL(raw); err != nil {
 		return "", err
 	}
