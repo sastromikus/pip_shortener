@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"bytes"
+	"compress/gzip"
     "encoding/json"
 	"io"
 	"net/http"
@@ -187,4 +189,84 @@ func TestPOST_APIShorten_ReturnsJSON(t *testing.T) {
     if !strings.HasPrefix(out.Result, baseURL+"/") {
         t.Fatalf("expected result to start with %q, got %q", baseURL+"/", out.Result)
     }
+}
+
+func TestAPIShorten_GzipResponse(t *testing.T) {
+	repo := repository.NewMemoryRepository()
+	svc := service.NewShortener(repo)
+
+	logger := logrus.New()
+	logger.SetLevel(logrus.InfoLevel)
+
+	baseURL := "http://localhost:8080"
+	h := NewRouter(svc, baseURL, logger)
+
+	body := `{"url":"https://practicum.yandex.ru"}`
+	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/shorten", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	res := w.Result()
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected %d, got %d", http.StatusCreated, res.StatusCode)
+	}
+	if ce := res.Header.Get("Content-Encoding"); ce != "gzip" {
+		t.Fatalf("expected Content-Encoding gzip, got %q", ce)
+	}
+
+	gr, err := gzip.NewReader(res.Body)
+	if err != nil {
+		t.Fatalf("gzip reader: %v", err)
+	}
+	defer gr.Close()
+
+	b, err := io.ReadAll(gr)
+	if err != nil {
+		t.Fatalf("read gzip body: %v", err)
+	}
+
+	var out struct {
+		Result string `json:"result"`
+	}
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatalf("unmarshal: %v; body=%q", err, string(b))
+	}
+	if !strings.HasPrefix(out.Result, baseURL+"/") {
+		t.Fatalf("expected result to start with %q, got %q", baseURL+"/", out.Result)
+	}
+}
+
+func TestAPIShorten_GzipRequest(t *testing.T) {
+	repo := repository.NewMemoryRepository()
+	svc := service.NewShortener(repo)
+
+	logger := logrus.New()
+	logger.SetLevel(logrus.InfoLevel)
+
+	baseURL := "http://localhost:8080"
+	h := NewRouter(svc, baseURL, logger)
+
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	_, _ = gw.Write([]byte(`{"url":"https://practicum.yandex.ru"}`))
+	_ = gw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/shorten", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	res := w.Result()
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected %d, got %d", http.StatusCreated, res.StatusCode)
+	}
 }

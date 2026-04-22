@@ -20,6 +20,7 @@ func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger) ht
     baseURL = strings.TrimRight(baseURL, "/")
 
     r := chi.NewRouter()
+    r.Use(middleware.Gzip())
     r.Use(middleware.Logger(logger))
 
     r.NotFound(func(w http.ResponseWriter, r *http.Request) { badRequest(w) })
