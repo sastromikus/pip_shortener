@@ -18,12 +18,19 @@ import (
 )
 
 func main() {
+	var repo repository.URLRepository
+
 	cfg := config.Parse()
-	repo := repository.NewMemoryRepository()
-	svc := service.NewShortener(repo)
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)
 
+	fileRepo, err := repository.NewFileRepository(cfg.FileStoragePath)
+	if err != nil {
+	    log.Fatalf("file repository: %v", err)
+	}
+	repo = fileRepo
+
+	svc := service.NewShortener(repo)
 	router := handler.NewRouter(svc, cfg.BaseURL, logger)
 
 	srv := &http.Server{
