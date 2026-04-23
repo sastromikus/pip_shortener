@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"bytes"
+	"compress/gzip"
+    "encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,12 +12,16 @@ import (
 
 	"github.com/sastromikus/pip_shortener/internal/repository"
 	"github.com/sastromikus/pip_shortener/internal/service"
+
+    "github.com/sirupsen/logrus"
 )
 
 func TestPOST_Shorten_Returns201AndShortURL(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
-	h := NewRouter(svc, "http://localhost:8080")
+	logger := logrus.New()
+	logger.SetLevel(logrus.InfoLevel)
+	h := NewRouter(svc, "http://localhost:8080", logger)
 
 	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/", strings.NewReader("https://practicum.yandex.ru/"))
 	req.Header.Set("Content-Type", "text/plain")
@@ -54,7 +61,9 @@ func TestPOST_Shorten_Returns201AndShortURL(t *testing.T) {
 func TestGET_Redirect_Returns307AndLocation(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
-	h := NewRouter(svc, "http://localhost:8080")
+	logger := logrus.New()
+	logger.SetLevel(logrus.InfoLevel)
+	h := NewRouter(svc, "http://localhost:8080", logger)
 
 	const id = "TESTID12"
 	const original = "https://example.com/path"
@@ -78,7 +87,9 @@ func TestGET_Redirect_Returns307AndLocation(t *testing.T) {
 func TestInvalidRequests_Return400(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
-	h := NewRouter(svc, "http://localhost:8080")
+	logger := logrus.New()
+	logger.SetLevel(logrus.InfoLevel)
+	h := NewRouter(svc, "http://localhost:8080", logger)
 
 	tests := []struct {
 		name string
@@ -130,5 +141,132 @@ func TestInvalidRequests_Return400(t *testing.T) {
 				t.Fatalf("expected 400, got %d", res.StatusCode)
 			}
 		})
+	}
+}
+
+func TestPOST_APIShorten_ReturnsJSON(t *testing.T) {
+    repo := repository.NewMemoryRepository()
+    svc := service.NewShortener(repo)
+
+    baseURL := "http://localhost:8080"
+
+    logger := logrus.New()
+    logger.SetLevel(logrus.InfoLevel)
+
+    h := NewRouter(svc, baseURL, logger)
+
+    body := `{"url":"https://practicum.yandex.ru"}`
+    req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/shorten", strings.NewReader(body))
+    req.Header.Set("Content-Type", "application/json")
+
+    w := httptest.NewRecorder()
+    h.ServeHTTP(w, req)
+
+    res := w.Result()
+    defer res.Body.Close()
+
+    if res.StatusCode != http.StatusCreated {
+        t.Fatalf("expected %d, got %d", http.StatusCreated, res.StatusCode)
+    }
+
+    ct := res.Header.Get("Content-Type")
+    if !strings.HasPrefix(strings.ToLower(ct), "application/json") {
+        t.Fatalf("expected application/json, got %q", ct)
+    }
+
+    b, err := io.ReadAll(res.Body)
+    if err != nil {
+        t.Fatalf("read body: %v", err)
+    }
+
+    var out struct {
+        Result string `json:"result"`
+    }
+    if err := json.Unmarshal(b, &out); err != nil {
+        t.Fatalf("unmarshal: %v; body=%q", err, string(b))
+    }
+
+    if !strings.HasPrefix(out.Result, baseURL+"/") {
+        t.Fatalf("expected result to start with %q, got %q", baseURL+"/", out.Result)
+    }
+}
+
+func TestAPIShorten_GzipResponse(t *testing.T) {
+	repo := repository.NewMemoryRepository()
+	svc := service.NewShortener(repo)
+
+	logger := logrus.New()
+	logger.SetLevel(logrus.InfoLevel)
+
+	baseURL := "http://localhost:8080"
+	h := NewRouter(svc, baseURL, logger)
+
+	body := `{"url":"https://practicum.yandex.ru"}`
+	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/shorten", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	res := w.Result()
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected %d, got %d", http.StatusCreated, res.StatusCode)
+	}
+	if ce := res.Header.Get("Content-Encoding"); ce != "gzip" {
+		t.Fatalf("expected Content-Encoding gzip, got %q", ce)
+	}
+
+	gr, err := gzip.NewReader(res.Body)
+	if err != nil {
+		t.Fatalf("gzip reader: %v", err)
+	}
+	defer gr.Close()
+
+	b, err := io.ReadAll(gr)
+	if err != nil {
+		t.Fatalf("read gzip body: %v", err)
+	}
+
+	var out struct {
+		Result string `json:"result"`
+	}
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatalf("unmarshal: %v; body=%q", err, string(b))
+	}
+	if !strings.HasPrefix(out.Result, baseURL+"/") {
+		t.Fatalf("expected result to start with %q, got %q", baseURL+"/", out.Result)
+	}
+}
+
+func TestAPIShorten_GzipRequest(t *testing.T) {
+	repo := repository.NewMemoryRepository()
+	svc := service.NewShortener(repo)
+
+	logger := logrus.New()
+	logger.SetLevel(logrus.InfoLevel)
+
+	baseURL := "http://localhost:8080"
+	h := NewRouter(svc, baseURL, logger)
+
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	_, _ = gw.Write([]byte(`{"url":"https://practicum.yandex.ru"}`))
+	_ = gw.Close()
+
+	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/shorten", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	res := w.Result()
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected %d, got %d", http.StatusCreated, res.StatusCode)
 	}
 }
