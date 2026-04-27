@@ -16,6 +16,8 @@ import (
 	"github.com/sastromikus/pip_shortener/internal/service"
 
     "github.com/sirupsen/logrus"
+
+    _ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func main() {
