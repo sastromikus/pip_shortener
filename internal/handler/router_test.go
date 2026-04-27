@@ -21,7 +21,7 @@ func TestPOST_Shorten_Returns201AndShortURL(t *testing.T) {
 	svc := service.NewShortener(repo)
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)
-	h := NewRouter(svc, "http://localhost:8080", logger)
+	h := NewRouter(svc, "http://localhost:8080", logger, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/", strings.NewReader("https://practicum.yandex.ru/"))
 	req.Header.Set("Content-Type", "text/plain")
@@ -63,7 +63,7 @@ func TestGET_Redirect_Returns307AndLocation(t *testing.T) {
 	svc := service.NewShortener(repo)
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)
-	h := NewRouter(svc, "http://localhost:8080", logger)
+	h := NewRouter(svc, "http://localhost:8080", logger, nil)
 
 	const id = "TESTID12"
 	const original = "https://example.com/path"
@@ -89,7 +89,7 @@ func TestInvalidRequests_Return400(t *testing.T) {
 	svc := service.NewShortener(repo)
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)
-	h := NewRouter(svc, "http://localhost:8080", logger)
+	h := NewRouter(svc, "http://localhost:8080", logger, nil)
 
 	tests := []struct {
 		name string
@@ -153,7 +153,7 @@ func TestPOST_APIShorten_ReturnsJSON(t *testing.T) {
     logger := logrus.New()
     logger.SetLevel(logrus.InfoLevel)
 
-    h := NewRouter(svc, baseURL, logger)
+    h := NewRouter(svc, baseURL, logger, nil)
 
     body := `{"url":"https://practicum.yandex.ru"}`
     req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/shorten", strings.NewReader(body))
@@ -199,7 +199,7 @@ func TestAPIShorten_GzipResponse(t *testing.T) {
 	logger.SetLevel(logrus.InfoLevel)
 
 	baseURL := "http://localhost:8080"
-	h := NewRouter(svc, baseURL, logger)
+	h := NewRouter(svc, baseURL, logger, nil)
 
 	body := `{"url":"https://practicum.yandex.ru"}`
 	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/shorten", strings.NewReader(body))
@@ -249,7 +249,7 @@ func TestAPIShorten_GzipRequest(t *testing.T) {
 	logger.SetLevel(logrus.InfoLevel)
 
 	baseURL := "http://localhost:8080"
-	h := NewRouter(svc, baseURL, logger)
+	h := NewRouter(svc, baseURL, logger, nil)
 
 	var buf bytes.Buffer
 	gw := gzip.NewWriter(&buf)
