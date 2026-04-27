@@ -35,6 +35,10 @@ func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger, db
         handleAPIPostShortenJSON(svc, baseURL, w, r)
     })
 
+    r.Post("/api/shorten/batch", func(w http.ResponseWriter, r *http.Request) {
+        handleAPIPostShortenBatchJSON(svc, baseURL, w, r)
+    })
+
     r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
         handlePing(db, w, r)
     })
