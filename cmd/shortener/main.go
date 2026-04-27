@@ -16,6 +16,8 @@ import (
 	"github.com/sastromikus/pip_shortener/internal/service"
 
     "github.com/sirupsen/logrus"
+
+    _ "github.com/lib/pq"
 )
 
 func main() {
@@ -26,22 +28,33 @@ func main() {
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)
 
-	fileRepo, err := repository.NewFileRepository(cfg.FileStoragePath)
-	if err != nil {
-	    log.Fatalf("file repository: %v", err)
-	}
-	repo = fileRepo
-
 	if cfg.DatabaseDSN != "" {
-	    d, err := sql.Open("pgx", cfg.DatabaseDSN)
-	    if err != nil { log.Fatalf("db open: %v", err) }
-	    db = d
+		d, err := sql.Open("postgres", cfg.DatabaseDSN)
+		if err != nil {
+			log.Fatalf("db open: %v", err)
+		}
+		db = d
 
-	    ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	    defer cancel()
-	    if err := db.PingContext(ctx); err != nil {
-	        log.Printf("db ping failed: %v", err)
-	    }
+		if err := repository.RunSQLMigration(db, "migrations/0001_create_urls.sql"); err != nil {
+			log.Fatalf("migrations: %v", err)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := db.PingContext(ctx); err != nil {
+			log.Printf("db ping failed: %v", err)
+		}
+
+		repo = repository.NewPostgresRepository(db)
+
+	} else if cfg.FileStoragePath != "" {
+		fileRepo, err := repository.NewFileRepository(cfg.FileStoragePath)
+		if err != nil {
+			log.Fatalf("file repository: %v", err)
+		}
+		repo = fileRepo
+	} else {
+		repo = repository.NewMemoryRepository()
 	}
 
 	svc := service.NewShortener(repo)
@@ -65,6 +78,10 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	if db != nil {
+	    _ = db.Close()
+	}
 
 	_ = srv.Shutdown(ctx)
 	log.Println("shutdown")

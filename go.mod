@@ -8,6 +8,7 @@ require (
 )
 
 require (
+	github.com/lib/pq v1.12.3 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
 	golang.org/x/sys v0.13.0 // indirect
 )
