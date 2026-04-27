@@ -35,13 +35,13 @@ func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger, db
         handleAPIPostShortenJSON(svc, baseURL, w, r)
     })
 
+    r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
+        handlePing(db, w, r)
+    })
+
     r.Get("/{id}", func(w http.ResponseWriter, r *http.Request) {
         id := chi.URLParam(r, "id")
         handleRedirect(svc, id, w, r)
-    })
-
-    r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
-        handlePing(db, w, r)
     })
 
     return r
