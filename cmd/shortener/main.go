@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	"database/sql"
 
 	"github.com/sastromikus/pip_shortener/internal/config"
 	"github.com/sastromikus/pip_shortener/internal/handler"
@@ -19,6 +20,7 @@ import (
 
 func main() {
 	var repo repository.URLRepository
+	var db *sql.DB
 
 	cfg := config.Parse()
 	logger := logrus.New()
@@ -30,8 +32,20 @@ func main() {
 	}
 	repo = fileRepo
 
+	if cfg.DatabaseDSN != "" {
+	    d, err := sql.Open("pgx", cfg.DatabaseDSN)
+	    if err != nil { log.Fatalf("db open: %v", err) }
+	    db = d
+
+	    ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	    defer cancel()
+	    if err := db.PingContext(ctx); err != nil {
+	        log.Printf("db ping failed: %v", err)
+	    }
+	}
+
 	svc := service.NewShortener(repo)
-	router := handler.NewRouter(svc, cfg.BaseURL, logger)
+	router := handler.NewRouter(svc, cfg.BaseURL, logger, db)
 
 	srv := &http.Server{
 	    Addr: cfg.ServerAddr,
