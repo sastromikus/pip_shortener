@@ -9,6 +9,7 @@ type Config struct {
 	ServerAddr string
 	BaseURL    string
 	FileStoragePath string
+	DatabaseDSN string
 }
 
 const (
@@ -20,6 +21,8 @@ const (
 
 	defaultFileStoragePath 	= "storage.json"
 	envFileStoragePath 		= "FILE_STORAGE_PATH"
+
+	envDatabaseDSN = "DATABASE_DSN"
 )
 
 func Parse() Config {
@@ -32,10 +35,12 @@ func Parse() Config {
 	var flagAddr string
 	var flagBase string
 	var flagFile string
+	var flagDSN string
 
 	flag.StringVar(&flagFile, "f", "", "File storage path")
 	flag.StringVar(&flagAddr, "a", "", "HTTP server address")
 	flag.StringVar(&flagBase, "b", "", "Base URL for short links")
+	flag.StringVar(&flagDSN, "d", "", "Database DSN")
 	flag.Parse()
 
 	if flagAddr != "" {
@@ -47,6 +52,9 @@ func Parse() Config {
 	if flagFile != "" {
 		cfg.FileStoragePath = flagFile
 	}
+	if flagDSN != "" { 
+		cfg.DatabaseDSN = flagDSN 
+	}
 
 	if v := os.Getenv(envServerAddr); v != "" {
 		cfg.ServerAddr = v
@@ -56,6 +64,9 @@ func Parse() Config {
 	}
 	if v := os.Getenv(envFileStoragePath); v != "" {
 		cfg.FileStoragePath = v
+	}
+	if v := os.Getenv(envDatabaseDSN); v != "" { 
+		cfg.DatabaseDSN = v 
 	}
 
 	return cfg
