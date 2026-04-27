@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+    "database/sql"
 
 	"github.com/go-chi/chi/v5"
 
@@ -16,7 +17,7 @@ import (
 
 const maxPOSTBody = 8 << 10 
 
-func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger) http.Handler {
+func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger, db *sql.DB) http.Handler {
     baseURL = strings.TrimRight(baseURL, "/")
 
     r := chi.NewRouter()
@@ -37,6 +38,10 @@ func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger) ht
     r.Get("/{id}", func(w http.ResponseWriter, r *http.Request) {
         id := chi.URLParam(r, "id")
         handleRedirect(svc, id, w, r)
+    })
+
+    r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
+        handlePing(db, w, r)
     })
 
     return r
