@@ -17,7 +17,7 @@ import (
 
     "github.com/sirupsen/logrus"
 
-    _ "github.com/jackc/pgx/v5/stdlib"
+    _ "github.com/lib/pq"
 )
 
 func main() {
@@ -35,7 +35,7 @@ func main() {
 	repo = fileRepo
 
 	if cfg.DatabaseDSN != "" {
-	    d, err := sql.Open("pgx", cfg.DatabaseDSN)
+	    d, err := sql.Open("postgres", cfg.DatabaseDSN)
 	    if err != nil { log.Fatalf("db open: %v", err) }
 	    db = d
 
