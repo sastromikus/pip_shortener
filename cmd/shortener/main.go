@@ -42,6 +42,9 @@ func main() {
 		if err := repository.RunSQLMigration(db, "migrations/0002_unique_original.sql"); err != nil {
 			log.Fatalf("migrations: %v", err)
 		}
+		if err := repository.RunSQLMigration(db, "migrations/0003_create_user_urls.sql"); err != nil {
+		    log.Fatalf("migrations: %v", err)
+		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
