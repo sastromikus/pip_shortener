@@ -125,5 +125,9 @@ func (r *PostgresRepository) ListUserURLs(userID string) ([]UserURL, error) {
 		}
 		out = append(out, UserURL{ShortID: shortID, Original: original})
 	}
+	if err := rows.Err(); err != nil {
+	    return nil, err
+	}
+	
 	return out, nil
 }
