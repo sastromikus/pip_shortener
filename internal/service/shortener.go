@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/sastromikus/pip_shortener/internal/model"
 )
@@ -25,11 +26,13 @@ var (
 
 type URLRepository interface {
 	Get(id string) (string, bool)
+	GetWithDeleted(id string) (string, bool, bool)
 	GetByOriginal(original string) (string, bool)
 	PutIfAbsent(id string, original string) (bool, error)
 	PutBatchIfAbsent(items []model.URLItem) error
 	AddUserURL(userID, shortID string) error
 	ListUserURLs(userID string) ([]model.URLMapping, error)
+	MarkDeleted(userID string, ids []string) error
 }
 
 type UserURL struct {
@@ -48,12 +51,19 @@ type BatchResult struct {
 }
 
 type Shortener struct {
-	repo URLRepository
+	repo     URLRepository
+	deleteCh chan DeleteTask
+}
+
+type DeleteTask struct {
+	UserID string
+	IDs    []string
 }
 
 func NewShortener(repo URLRepository) *Shortener {
 	return &Shortener{
-		repo: repo,
+		repo:     repo,
+		deleteCh: make(chan DeleteTask, 1024),
 	}
 }
 
@@ -311,4 +321,105 @@ func validateURL(raw string) error {
 	}
 
 	return nil
+}
+
+func (s *Shortener) EnqueueDelete(userID string, ids []string) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" || len(ids) == 0 {
+		return
+	}
+
+	cleanIDs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			cleanIDs = append(cleanIDs, id)
+		}
+	}
+
+	if len(cleanIDs) == 0 {
+		return
+	}
+
+	select {
+	case s.deleteCh <- DeleteTask{UserID: userID, IDs: cleanIDs}:
+	default:
+	}
+}
+
+func (s *Shortener) StartDeleteWorker(batchSize int, flushEvery time.Duration) {
+	if batchSize <= 0 {
+		batchSize = 64
+	}
+	if flushEvery <= 0 {
+		flushEvery = 500 * time.Millisecond
+	}
+
+	go func() {
+		pending := make(map[string]map[string]struct{})
+
+		flush := func() {
+			for userID, set := range pending {
+				if len(set) == 0 {
+					continue
+				}
+
+				ids := make([]string, 0, len(set))
+				for id := range set {
+					ids = append(ids, id)
+				}
+
+				_ = s.repo.MarkDeleted(userID, ids)
+				delete(pending, userID)
+			}
+		}
+
+		ticker := time.NewTicker(flushEvery)
+		defer ticker.Stop()
+
+		count := 0
+		for {
+			select {
+			case task, ok := <-s.deleteCh:
+				if !ok {
+					flush()
+					return
+				}
+
+				if task.UserID == "" || len(task.IDs) == 0 {
+					continue
+				}
+
+				set := pending[task.UserID]
+				if set == nil {
+					set = make(map[string]struct{})
+					pending[task.UserID] = set
+				}
+
+				for _, id := range task.IDs {
+					id = strings.TrimSpace(id)
+					if id == "" {
+						continue
+					}
+					set[id] = struct{}{}
+					count++
+				}
+
+				if count >= batchSize {
+					flush()
+					count = 0
+				}
+
+			case <-ticker.C:
+				if count > 0 {
+					flush()
+					count = 0
+				}
+			}
+		}
+	}()
+}
+
+func (s *Shortener) ResolveWithDeleted(id string) (string, bool, bool) {
+	return s.repo.GetWithDeleted(id)
 }
