@@ -21,6 +21,7 @@ func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger, db
     baseURL = strings.TrimRight(baseURL, "/")
 
     r := chi.NewRouter()
+    r.Use(middleware.Auth())
     r.Use(middleware.Gzip())
     r.Use(middleware.Logger(logger))
 
@@ -41,6 +42,14 @@ func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger, db
 
     r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
         handlePing(db, w, r)
+    })
+
+    r.Get("/api/user/urls", func(w http.ResponseWriter, r *http.Request) {
+        handleGetUserURLs(svc, baseURL, w, r)
+    })
+
+    r.Delete("/api/user/urls", func(w http.ResponseWriter, r *http.Request) {
+        handleDeleteUserURLs(svc, w, r)
     })
 
     r.Get("/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -70,7 +79,8 @@ func handleShorten(svc *service.Shortener, baseURL string, w http.ResponseWriter
         return
     }
 
-    id, existed, err := svc.ShortenWithExisting(raw)
+    userID, _ := middleware.UserIDFromContext(r.Context())
+    id, existed, err := svc.ShortenForUser(raw, userID)
     if err != nil {
         badRequest(w)
         return
@@ -88,20 +98,18 @@ func handleShorten(svc *service.Shortener, baseURL string, w http.ResponseWriter
 }
 
 func handleRedirect(svc *service.Shortener, id string, w http.ResponseWriter, r *http.Request) {
-	id = strings.TrimSpace(id)
-	if id == "" || strings.ContainsAny(id, " \t\r\n") {
-		badRequest(w)
-		return
-	}
+    original, ok, deleted := svc.ResolveWithDeleted(id)
+    if !ok {
+        badRequest(w)
+        return
+    }
+    if deleted {
+        w.WriteHeader(http.StatusGone)
+        return
+    }
 
-	original, ok := svc.Resolve(id)
-	if !ok {
-		badRequest(w)
-		return
-	}
-
-	w.Header().Set("Location", original)
-	w.WriteHeader(http.StatusTemporaryRedirect)
+    w.Header().Set("Location", original)
+    w.WriteHeader(http.StatusTemporaryRedirect)
 }
 
 func readBody(r *http.Request, limit int64) ([]byte, error) {

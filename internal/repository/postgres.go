@@ -11,6 +11,16 @@ type PostgresRepository struct {
 	db *sql.DB
 }
 
+type UserURL struct {
+	ShortID  string
+	Original string
+}
+
+type UserURLStore interface {
+	AddUserURL(userID, shortID string) error
+	ListUserURLs(userID string) ([]UserURL, error)
+}
+
 func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
@@ -82,4 +92,75 @@ func IsUniqueViolationOn(err error, constraint string) bool {
 	}
 
 	return pqe.Constraint == constraint
+}
+
+func (r *PostgresRepository) AddUserURL(userID, shortID string) error {
+	_, err := r.db.ExecContext(context.Background(),
+		`INSERT INTO user_urls (user_id, short_id) VALUES ($1,$2)
+		 ON CONFLICT (user_id, short_id) DO NOTHING`,
+		userID, shortID,
+	)
+	return err
+}
+
+func (r *PostgresRepository) ListUserURLs(userID string) ([]UserURL, error) {
+	rows, err := r.db.QueryContext(context.Background(),
+		`SELECT u.short_id, u.original_url
+		   FROM user_urls uu
+		   JOIN urls u ON u.short_id = uu.short_id
+		  WHERE uu.user_id = $1
+		  ORDER BY u.id`,
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]UserURL, 0)
+	for rows.Next() {
+		var shortID, original string
+		if err := rows.Scan(&shortID, &original); err != nil {
+			return nil, err
+		}
+		out = append(out, UserURL{ShortID: shortID, Original: original})
+	}
+	if err := rows.Err(); err != nil {
+	    return nil, err
+	}
+	
+	return out, nil
+}
+
+func (r *PostgresRepository) GetWithDeleted(id string) (string, bool, bool) {
+    var original string
+    var deleted bool
+
+    err := r.db.QueryRowContext(context.Background(),
+        `SELECT original_url, is_deleted FROM urls WHERE short_id = $1`, id,
+    ).Scan(&original, &deleted)
+
+    if err != nil {
+        return "", false, false
+    }
+
+    return original, true, deleted
+}
+
+func (r *PostgresRepository) MarkDeleted(userID string, ids []string) error {
+    if len(ids) == 0 {
+        return nil
+    }
+
+    _, err := r.db.ExecContext(context.Background(),
+        `UPDATE urls u
+           SET is_deleted = TRUE
+          FROM user_urls uu
+         WHERE uu.short_id = u.short_id
+           AND uu.user_id = $1
+           AND u.short_id = ANY($2)`,
+        userID, pq.Array(ids),
+    )
+    
+    return err
 }
