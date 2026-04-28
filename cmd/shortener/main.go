@@ -50,6 +50,7 @@ func runMigrations(db *sql.DB) {
 		"0001_create_urls.sql",
 		"0002_unique_original.sql",
 		"0003_create_user_urls.sql",
+		"0004_add_is_deleted.sql",
 	}
 
 	var lastErr error
