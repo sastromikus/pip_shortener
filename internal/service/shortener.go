@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/url"
 	"strings"
+
+	"github.com/sastromikus/pip_shortener/internal/repository"
 )
 
 const (
@@ -27,26 +29,60 @@ func NewShortener(repo URLRepository) *Shortener {
 }
 
 func (s *Shortener) Shorten(raw string) (string, error) {
+	id, _, err := s.ShortenWithExisting(raw)
+	return id, err
+}
+
+func (s *Shortener) ShortenWithExisting(raw string) (string, bool, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return "", errors.New("empty url")
+		return "", false, errors.New("empty url")
 	}
-
 	if !strings.Contains(raw, "://") {
 		raw = "http://" + raw
 	}
 
-	if err := validateURL(raw); err != nil {
-		return "", err
+	if pg, ok := s.repo.(*repository.PostgresRepository); ok {
+		const (
+			originalUQ = "urls_original_url_uq"
+			shortUQ    = "urls_short_id_key"
+		)
+
+		for tries := 0; tries < 10; tries++ {
+			id, err := s.generateUniqueID(idLen, 10)
+			if err != nil {
+				return "", false, err
+			}
+
+			err = pg.Insert(id, raw)
+			if err == nil {
+				return id, false, nil
+			}
+
+			if repository.IsUniqueViolationOn(err, originalUQ) {
+				existing, ok := pg.GetByOriginal(raw)
+				if ok {
+					return existing, true, nil
+				}
+				return "", false, err
+			}
+
+			if repository.IsUniqueViolationOn(err, shortUQ) {
+				continue
+			}
+
+			return "", false, err
+		}
+		return "", false, errors.New("cannot insert url")
 	}
 
 	id, err := s.generateUniqueID(idLen, 10)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-
 	s.repo.Put(id, raw)
-	return id, nil
+
+	return id, false, nil
 }
 
 func (s *Shortener) Resolve(id string) (string, bool) {
