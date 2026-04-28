@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/sastromikus/pip_shortener/internal/service"
+	"github.com/sastromikus/pip_shortener/internal/handler/middleware"
 )
 
 type apiShortenRequest struct {
@@ -41,7 +42,8 @@ func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, w http.Res
 		return
 	}
 
-	id, existed, err := svc.ShortenWithExisting(raw)
+	userID, _ := middleware.UserIDFromContext(r.Context())
+	id, existed, err := svc.ShortenForUser(raw, userID)
 	if err != nil {
 		badRequest(w)
 		return

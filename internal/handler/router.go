@@ -44,6 +44,10 @@ func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger, db
         handlePing(db, w, r)
     })
 
+    r.Get("/api/user/urls", func(w http.ResponseWriter, r *http.Request) {
+        handleGetUserURLs(svc, baseURL, w, r)
+    })
+
     r.Get("/{id}", func(w http.ResponseWriter, r *http.Request) {
         id := chi.URLParam(r, "id")
         handleRedirect(svc, id, w, r)
@@ -71,7 +75,8 @@ func handleShorten(svc *service.Shortener, baseURL string, w http.ResponseWriter
         return
     }
 
-    id, existed, err := svc.ShortenWithExisting(raw)
+    userID, _ := middleware.UserIDFromContext(r.Context())
+    id, existed, err := svc.ShortenForUser(raw, userID)
     if err != nil {
         badRequest(w)
         return
