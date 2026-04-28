@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	"database/sql"
 
 	"github.com/sastromikus/pip_shortener/internal/config"
 	"github.com/sastromikus/pip_shortener/internal/handler"
@@ -15,23 +16,53 @@ import (
 	"github.com/sastromikus/pip_shortener/internal/service"
 
     "github.com/sirupsen/logrus"
+
+    _ "github.com/lib/pq"
 )
 
 func main() {
 	var repo repository.URLRepository
+	var db *sql.DB
 
 	cfg := config.Parse()
+	log.Printf("DatabaseDSN=%q", cfg.DatabaseDSN)
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)
 
-	fileRepo, err := repository.NewFileRepository(cfg.FileStoragePath)
-	if err != nil {
-	    log.Fatalf("file repository: %v", err)
+	if cfg.DatabaseDSN != "" {
+		d, err := sql.Open("postgres", cfg.DatabaseDSN)
+		if err != nil {
+			log.Fatalf("db open: %v", err)
+		}
+		db = d
+
+		if err := repository.RunSQLMigration(db, "migrations/0001_create_urls.sql"); err != nil {
+			log.Fatalf("migrations: %v", err)
+		}
+		if err := repository.RunSQLMigration(db, "migrations/0002_unique_original.sql"); err != nil {
+			log.Fatalf("migrations: %v", err)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := db.PingContext(ctx); err != nil {
+			log.Printf("db ping failed: %v", err)
+		}
+
+		repo = repository.NewPostgresRepository(db)
+
+	} else if cfg.FileStoragePath != "" {
+		fileRepo, err := repository.NewFileRepository(cfg.FileStoragePath)
+		if err != nil {
+			log.Fatalf("file repository: %v", err)
+		}
+		repo = fileRepo
+	} else {
+		repo = repository.NewMemoryRepository()
 	}
-	repo = fileRepo
 
 	svc := service.NewShortener(repo)
-	router := handler.NewRouter(svc, cfg.BaseURL, logger)
+	router := handler.NewRouter(svc, cfg.BaseURL, logger, db)
 
 	srv := &http.Server{
 	    Addr: cfg.ServerAddr,
@@ -51,6 +82,10 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	if db != nil {
+	    _ = db.Close()
+	}
 
 	_ = srv.Shutdown(ctx)
 	log.Println("shutdown")

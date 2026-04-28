@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+    "database/sql"
 
 	"github.com/go-chi/chi/v5"
 
@@ -16,7 +17,7 @@ import (
 
 const maxPOSTBody = 8 << 10 
 
-func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger) http.Handler {
+func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger, db *sql.DB) http.Handler {
     baseURL = strings.TrimRight(baseURL, "/")
 
     r := chi.NewRouter()
@@ -32,6 +33,14 @@ func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger) ht
 
     r.Post("/api/shorten", func(w http.ResponseWriter, r *http.Request) {
         handleAPIPostShortenJSON(svc, baseURL, w, r)
+    })
+
+    r.Post("/api/shorten/batch", func(w http.ResponseWriter, r *http.Request) {
+        handleAPIPostShortenBatchJSON(svc, baseURL, w, r)
+    })
+
+    r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
+        handlePing(db, w, r)
     })
 
     r.Get("/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -61,7 +70,7 @@ func handleShorten(svc *service.Shortener, baseURL string, w http.ResponseWriter
         return
     }
 
-    id, err := svc.Shorten(raw)
+    id, existed, err := svc.ShortenWithExisting(raw)
     if err != nil {
         badRequest(w)
         return
@@ -70,7 +79,11 @@ func handleShorten(svc *service.Shortener, baseURL string, w http.ResponseWriter
     shortURL := baseURL + "/" + id
 
     w.Header().Set("Content-Type", "text/plain")
-    w.WriteHeader(http.StatusCreated)
+    if existed {
+        w.WriteHeader(http.StatusConflict)
+    } else {
+        w.WriteHeader(http.StatusCreated)
+    }
     _, _ = w.Write([]byte(shortURL))
 }
 
