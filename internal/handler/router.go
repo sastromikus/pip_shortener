@@ -48,6 +48,10 @@ func NewRouter(svc *service.Shortener, baseURL string, logger *slog.Logger, db *
 		handlePing(db, w, r)
 	})
 
+	r.Delete("/api/user/urls", func(w http.ResponseWriter, r *http.Request) {
+		handleDeleteUserURLs(svc, w, r)
+	})
+
 	r.Get("/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 		handleRedirect(svc, id, w, r)
@@ -104,15 +108,13 @@ func handleShorten(svc *service.Shortener, baseURL string, logger *slog.Logger, 
 }
 
 func handleRedirect(svc *service.Shortener, id string, w http.ResponseWriter, r *http.Request) {
-	id = strings.TrimSpace(id)
-	if id == "" || strings.ContainsAny(id, " \t\r\n") {
+	original, ok, deleted := svc.ResolveWithDeleted(id)
+	if !ok {
 		badRequest(w)
 		return
 	}
-
-	original, ok := svc.Resolve(id)
-	if !ok {
-		badRequest(w)
+	if deleted {
+		w.WriteHeader(http.StatusGone)
 		return
 	}
 
