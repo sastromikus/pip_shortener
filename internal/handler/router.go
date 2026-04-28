@@ -70,7 +70,7 @@ func handleShorten(svc *service.Shortener, baseURL string, w http.ResponseWriter
         return
     }
 
-    id, err := svc.Shorten(raw)
+    id, existed, err := svc.ShortenWithExisting(raw)
     if err != nil {
         badRequest(w)
         return
@@ -79,7 +79,11 @@ func handleShorten(svc *service.Shortener, baseURL string, w http.ResponseWriter
     shortURL := baseURL + "/" + id
 
     w.Header().Set("Content-Type", "text/plain")
-    w.WriteHeader(http.StatusCreated)
+    if existed {
+        w.WriteHeader(http.StatusConflict)
+    } else {
+        w.WriteHeader(http.StatusCreated)
+    }
     _, _ = w.Write([]byte(shortURL))
 }
 

@@ -41,7 +41,7 @@ func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, w http.Res
 		return
 	}
 
-	id, err := svc.Shorten(raw)
+	id, existed, err := svc.ShortenWithExisting(raw)
 	if err != nil {
 		badRequest(w)
 		return
@@ -51,6 +51,10 @@ func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, w http.Res
 	resp := apiShortenResponse{Result: shortURL}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
+	if existed {
+		w.WriteHeader(http.StatusConflict)
+	} else {
+		w.WriteHeader(http.StatusCreated)
+	}
 	_ = json.NewEncoder(w).Encode(resp)
 }
