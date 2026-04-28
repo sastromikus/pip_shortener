@@ -108,6 +108,7 @@ func main() {
 	}
 
 	svc := service.NewShortener(repo)
+	svc.StartDeleteWorker(128, 500 * time.Millisecond)
 	router := handler.NewRouter(svc, cfg.BaseURL, logger, db)
 
 	srv := &http.Server{
