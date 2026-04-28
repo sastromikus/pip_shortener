@@ -6,13 +6,17 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 
 	"github.com/sastromikus/pip_shortener/internal/model"
 )
 
 type FileRepository struct {
-	path string
-	mem  *MemoryRepository
+	mu        sync.Mutex
+	path      string
+	usersPath string
+	mem       *MemoryRepository
+	user      map[string]map[string]struct{}
 }
 
 type fileRecord struct {
@@ -27,11 +31,17 @@ func NewFileRepository(path string) (*FileRepository, error) {
 	}
 
 	r := &FileRepository{
-		path: path,
-		mem:  NewMemoryRepository(),
+		path:      path,
+		usersPath: path + ".users",
+		mem:       NewMemoryRepository(),
+		user:      make(map[string]map[string]struct{}),
 	}
 
 	if err := r.load(); err != nil {
+		return nil, err
+	}
+
+	if err := r.loadUsers(); err != nil {
 		return nil, err
 	}
 
@@ -92,6 +102,45 @@ func (r *FileRepository) PutBatchIfAbsent(items []model.URLItem) error {
 	return nil
 }
 
+func (r *FileRepository) AddUserURL(userID, shortID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	set, ok := r.user[userID]
+	if !ok {
+		set = make(map[string]struct{})
+		r.user[userID] = set
+	}
+
+	set[shortID] = struct{}{}
+	return r.saveUsersLocked()
+}
+
+func (r *FileRepository) ListUserURLs(userID string) ([]model.URLMapping, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	set := r.user[userID]
+	if len(set) == 0 {
+		return nil, nil
+	}
+
+	out := make([]model.URLMapping, 0, len(set))
+	for id := range set {
+		orig, ok := r.mem.Get(id)
+		if !ok {
+			continue
+		}
+
+		out = append(out, model.URLMapping{
+			ID:       id,
+			Original: orig,
+		})
+	}
+
+	return out, nil
+}
+
 func (r *FileRepository) load() error {
 	b, err := os.ReadFile(r.path)
 	if err != nil {
@@ -149,4 +198,68 @@ func (r *FileRepository) save() error {
 	}
 
 	return os.Rename(tmp, r.path)
+}
+
+func (r *FileRepository) loadUsers() error {
+	b, err := os.ReadFile(r.usersPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	if len(b) == 0 {
+		return nil
+	}
+
+	var m map[string][]string
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+
+	for userID, ids := range m {
+		set := make(map[string]struct{})
+		for _, id := range ids {
+			if id == "" {
+				continue
+			}
+
+			set[id] = struct{}{}
+		}
+
+		r.user[userID] = set
+	}
+
+	return nil
+}
+
+func (r *FileRepository) saveUsersLocked() error {
+	dir := filepath.Dir(r.usersPath)
+	if dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+
+	m := make(map[string][]string, len(r.user))
+	for userID, set := range r.user {
+		ids := make([]string, 0, len(set))
+		for id := range set {
+			ids = append(ids, id)
+		}
+		m[userID] = ids
+	}
+
+	b, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	tmp := r.usersPath + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+
+	return os.Rename(tmp, r.usersPath)
 }

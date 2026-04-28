@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
-	"sync"
 
 	"github.com/sastromikus/pip_shortener/internal/model"
 )
@@ -29,6 +28,8 @@ type URLRepository interface {
 	GetByOriginal(original string) (string, bool)
 	PutIfAbsent(id string, original string) (bool, error)
 	PutBatchIfAbsent(items []model.URLItem) error
+	AddUserURL(userID, shortID string) error
+	ListUserURLs(userID string) ([]model.URLMapping, error)
 }
 
 type UserURL struct {
@@ -48,15 +49,11 @@ type BatchResult struct {
 
 type Shortener struct {
 	repo URLRepository
-
-	mu       sync.Mutex
-	userURLs map[string][]UserURL
 }
 
 func NewShortener(repo URLRepository) *Shortener {
 	return &Shortener{
-		repo:     repo,
-		userURLs: make(map[string][]UserURL),
+		repo: repo,
 	}
 }
 
@@ -99,7 +96,12 @@ func (s *Shortener) ShortenWithExistingForUser(raw string, userID string) (strin
 		return "", false, err
 	}
 
-	s.addUserURL(userID, id, normalized)
+	userID = strings.TrimSpace(userID)
+	if userID != "" {
+		if err := s.repo.AddUserURL(userID, id); err != nil {
+			return "", false, fmt.Errorf("%w: %v", ErrStorage, err)
+		}
+	}
 
 	return id, existed, nil
 }
@@ -175,6 +177,32 @@ func (s *Shortener) ShortenBatch(items []BatchItem) ([]BatchResult, error) {
 	return results, nil
 }
 
+func (s *Shortener) UserURLs(userID string) []UserURL {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil
+	}
+
+	items, err := s.repo.ListUserURLs(userID)
+	if err != nil {
+		return nil
+	}
+
+	out := make([]UserURL, 0, len(items))
+	for _, item := range items {
+		out = append(out, UserURL{
+			ID:          item.ID,
+			OriginalURL: item.Original,
+		})
+	}
+
+	return out
+}
+
+func (s *Shortener) Resolve(id string) (string, bool) {
+	return s.repo.Get(id)
+}
+
 func (s *Shortener) generateBatchID(used map[string]struct{}, length int, tries int) (string, error) {
 	for i := 0; i < tries; i++ {
 		id, err := randomstringbase(length)
@@ -195,29 +223,6 @@ func (s *Shortener) generateBatchID(used map[string]struct{}, length int, tries 
 	}
 
 	return "", ErrGenerateID
-}
-
-func (s *Shortener) UserURLs(userID string) []UserURL {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return nil
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	items := s.userURLs[userID]
-	if len(items) == 0 {
-		return nil
-	}
-
-	out := make([]UserURL, len(items))
-	copy(out, items)
-	return out
-}
-
-func (s *Shortener) Resolve(id string) (string, bool) {
-	return s.repo.Get(id)
 }
 
 func (s *Shortener) shortenNormalizedWithExisting(normalized string) (string, bool, error) {
@@ -254,21 +259,6 @@ func (s *Shortener) shortenWithUniqueID(raw string, length int, tries int) (stri
 	}
 
 	return "", false, ErrGenerateID
-}
-
-func (s *Shortener) addUserURL(userID string, id string, original string) {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.userURLs[userID] = append(s.userURLs[userID], UserURL{
-		ID:          id,
-		OriginalURL: original,
-	})
 }
 
 func normalizeURL(raw string) (string, error) {

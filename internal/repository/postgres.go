@@ -94,6 +94,52 @@ func (r *PostgresRepository) PutBatchIfAbsent(items []model.URLItem) error {
 	return err
 }
 
+func (r *PostgresRepository) AddUserURL(userID, shortID string) error {
+	_, err := r.db.ExecContext(context.TODO(),
+		`INSERT INTO user_urls (user_id, short_id)
+		 VALUES ($1, $2)
+		 ON CONFLICT (user_id, short_id) DO NOTHING`,
+		userID,
+		shortID,
+	)
+
+	return err
+}
+
+func (r *PostgresRepository) ListUserURLs(userID string) ([]model.URLMapping, error) {
+	rows, err := r.db.QueryContext(context.TODO(),
+		`SELECT u.short_id, u.original_url
+		   FROM user_urls uu
+		   JOIN urls u ON u.short_id = uu.short_id
+		  WHERE uu.user_id = $1
+		  ORDER BY u.id`,
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]model.URLMapping, 0)
+	for rows.Next() {
+		var shortID, original string
+		if err := rows.Scan(&shortID, &original); err != nil {
+			return nil, err
+		}
+
+		out = append(out, model.URLMapping{
+			ID:       shortID,
+			Original: original,
+		})
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return out, nil
+}
+
 func NewPostgresStorage(ctx context.Context, dsn string) (*sql.DB, *PostgresRepository, error) {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
@@ -117,6 +163,7 @@ func RunPostgresMigrations(db *sql.DB) error {
 	migrations := []string{
 		"migrations/0001_create_urls.sql",
 		"migrations/0002_unique_original.sql",
+		"migrations/0003_create_user_urls.sql",
 	}
 
 	for _, path := range migrations {
