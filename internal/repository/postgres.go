@@ -140,6 +140,40 @@ func (r *PostgresRepository) ListUserURLs(userID string) ([]model.URLMapping, er
 	return out, nil
 }
 
+func (r *PostgresRepository) GetWithDeleted(id string) (string, bool, bool) {
+	var original string
+	var deleted bool
+
+	err := r.db.QueryRowContext(context.TODO(),
+		`SELECT original_url, is_deleted FROM urls WHERE short_id = $1`,
+		id,
+	).Scan(&original, &deleted)
+	if err != nil {
+		return "", false, false
+	}
+
+	return original, true, deleted
+}
+
+func (r *PostgresRepository) MarkDeleted(userID string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	_, err := r.db.ExecContext(context.TODO(),
+		`UPDATE urls u
+		    SET is_deleted = TRUE
+		   FROM user_urls uu
+		  WHERE uu.short_id = u.short_id
+		    AND uu.user_id = $1
+		    AND u.short_id = ANY($2)`,
+		userID,
+		ids,
+	)
+
+	return err
+}
+
 func NewPostgresStorage(ctx context.Context, dsn string) (*sql.DB, *PostgresRepository, error) {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
@@ -164,6 +198,7 @@ func RunPostgresMigrations(db *sql.DB) error {
 		"migrations/0001_create_urls.sql",
 		"migrations/0002_unique_original.sql",
 		"migrations/0003_create_user_urls.sql",
+		"migrations/0004_add_is_deleted.sql",
 	}
 
 	for _, path := range migrations {
