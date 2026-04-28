@@ -25,6 +25,7 @@ func main() {
 	var db *sql.DB
 
 	cfg := config.Parse()
+	log.Printf("DatabaseDSN=%q", cfg.DatabaseDSN)
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)
 
@@ -36,6 +37,9 @@ func main() {
 		db = d
 
 		if err := repository.RunSQLMigration(db, "migrations/0001_create_urls.sql"); err != nil {
+			log.Fatalf("migrations: %v", err)
+		}
+		if err := repository.RunSQLMigration(db, "migrations/0002_unique_original.sql"); err != nil {
 			log.Fatalf("migrations: %v", err)
 		}
 
