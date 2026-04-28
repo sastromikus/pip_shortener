@@ -131,3 +131,36 @@ func (r *PostgresRepository) ListUserURLs(userID string) ([]UserURL, error) {
 	
 	return out, nil
 }
+
+func (r *PostgresRepository) GetWithDeleted(id string) (string, bool, bool) {
+    var original string
+    var deleted bool
+
+    err := r.db.QueryRowContext(context.Background(),
+        `SELECT original_url, is_deleted FROM urls WHERE short_id = $1`, id,
+    ).Scan(&original, &deleted)
+
+    if err != nil {
+        return "", false, false
+    }
+
+    return original, true, deleted
+}
+
+func (r *PostgresRepository) MarkDeleted(userID string, ids []string) error {
+    if len(ids) == 0 {
+        return nil
+    }
+
+    _, err := r.db.ExecContext(context.Background(),
+        `UPDATE urls u
+           SET is_deleted = TRUE
+          FROM user_urls uu
+         WHERE uu.short_id = u.short_id
+           AND uu.user_id = $1
+           AND u.short_id = ANY($2)`,
+        userID, pq.Array(ids),
+    )
+    
+    return err
+}
