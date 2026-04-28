@@ -21,11 +21,11 @@ type URLRepository interface {
 }
 
 type Shortener struct {
-	repo URLRepository
+    repo repository.URLRepository
 }
 
-func NewShortener(repo URLRepository) *Shortener {
-	return &Shortener{repo: repo}
+func NewShortener(repo repository.URLRepository) *Shortener {
+    return &Shortener{repo: repo}
 }
 
 func (s *Shortener) Shorten(raw string) (string, error) {
@@ -83,6 +83,34 @@ func (s *Shortener) ShortenWithExisting(raw string) (string, bool, error) {
 	s.repo.Put(id, raw)
 
 	return id, false, nil
+}
+
+func (s *Shortener) ShortenForUser(raw, userID string) (string, bool, error) {
+    id, existed, err := s.ShortenWithExisting(raw)
+    if err != nil {
+        return "", false, err
+    }
+
+    if userID != "" {
+        if us, ok := s.repo.(interface {
+            AddUserURL(userID, shortID string) error
+        }); ok {
+            _ = us.AddUserURL(userID, id)
+        }
+    }
+
+    return id, existed, nil
+}
+
+func (s *Shortener) ListUserURLs(userID string) ([]repository.UserURL, error) {
+    us, ok := s.repo.(interface {
+        ListUserURLs(userID string) ([]repository.UserURL, error)
+    })
+    if !ok {
+        return nil, nil
+    }
+    
+    return us.ListUserURLs(userID)
 }
 
 func (s *Shortener) Resolve(id string) (string, bool) {

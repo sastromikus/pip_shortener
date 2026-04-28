@@ -25,7 +25,6 @@ func main() {
 	var db *sql.DB
 
 	cfg := config.Parse()
-	log.Printf("DatabaseDSN=%q", cfg.DatabaseDSN)
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)
 

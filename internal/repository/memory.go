@@ -11,6 +11,7 @@ type URLRepository interface {
 type MemoryRepository struct {
 	mu   sync.RWMutex
 	data map[string]string
+	user map[string]map[string]struct{}
 }
 
 func NewMemoryRepository() *MemoryRepository {
@@ -37,4 +38,42 @@ func (r *MemoryRepository) Exists(id string) bool {
 	defer r.mu.RUnlock()
 	_, ok := r.data[id]
 	return ok
+}
+
+func (r *MemoryRepository) AddUserURL(userID, shortID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.user == nil {
+		r.user = make(map[string]map[string]struct{})
+	}
+	set, ok := r.user[userID]
+	if !ok {
+		set = make(map[string]struct{})
+		r.user[userID] = set
+	}
+	set[shortID] = struct{}{}
+
+	return nil
+}
+
+func (r *MemoryRepository) ListUserURLs(userID string) ([]UserURL, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	set := r.user[userID]
+	if len(set) == 0 {
+		return nil, nil
+	}
+
+	out := make([]UserURL, 0, len(set))
+	for shortID := range set {
+		orig, ok := r.data[shortID]
+		if !ok {
+			continue
+		}
+		out = append(out, UserURL{ShortID: shortID, Original: orig})
+	}
+	
+	return out, nil
 }

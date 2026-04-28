@@ -13,6 +13,9 @@ type FileRepository struct {
 	path string
 	data map[string]string
 	seq  int
+
+	usersPath string
+	user      map[string]map[string]struct{}
 }
 
 type fileRecord struct {
@@ -27,8 +30,17 @@ func NewFileRepository(path string) (*FileRepository, error) {
 	}
 
 	r := &FileRepository{
-		path: path,
-		data: make(map[string]string),
+	    path:      path,
+	    data:      make(map[string]string),
+	    usersPath: path + ".users",
+	    user:      make(map[string]map[string]struct{}),
+	}
+
+	if err := r.load(); err != nil {
+	    return nil, err
+	}
+	if err := r.loadUsers(); err != nil {
+	    return nil, err
 	}
 
 	if err := r.load(); err != nil {
@@ -158,4 +170,98 @@ func itoa(n int) string {
 	}
 	
 	return string(buf)
+}
+
+func (r *FileRepository) loadUsers() error {
+	b, err := os.ReadFile(r.usersPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if len(b) == 0 {
+		return nil
+	}
+
+	var m map[string][]string
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+
+	for uid, ids := range m {
+		set := make(map[string]struct{})
+		for _, id := range ids {
+			if id == "" {
+				continue
+			}
+			set[id] = struct{}{}
+		}
+		r.user[uid] = set
+	}
+
+	return nil
+}
+
+func (r *FileRepository) saveUsersLocked() error {
+	dir := filepath.Dir(r.usersPath)
+	if dir != "." && dir != "" {
+		_ = os.MkdirAll(dir, 0o755)
+	}
+
+	m := make(map[string][]string, len(r.user))
+	for uid, set := range r.user {
+		ids := make([]string, 0, len(set))
+		for id := range set {
+			ids = append(ids, id)
+		}
+		m[uid] = ids
+	}
+
+	b, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	tmp := r.usersPath + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+
+	return os.Rename(tmp, r.usersPath)
+}
+
+func (r *FileRepository) AddUserURL(userID, shortID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	set, ok := r.user[userID]
+	if !ok {
+		set = make(map[string]struct{})
+		r.user[userID] = set
+	}
+	set[shortID] = struct{}{}
+	
+	return r.saveUsersLocked()
+}
+
+func (r *FileRepository) ListUserURLs(userID string) ([]UserURL, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	set := r.user[userID]
+	if len(set) == 0 {
+		return nil, nil
+	}
+
+	out := make([]UserURL, 0, len(set))
+	for id := range set {
+		orig, ok := r.data[id]
+		if !ok {
+			continue
+		}
+		out = append(out, UserURL{ShortID: id, Original: orig})
+	}
+
+	return out, nil
 }
