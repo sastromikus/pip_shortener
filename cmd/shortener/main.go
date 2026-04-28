@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 	"database/sql"
+	"path/filepath"
 
 	"github.com/sastromikus/pip_shortener/internal/config"
 	"github.com/sastromikus/pip_shortener/internal/handler"
@@ -19,6 +20,56 @@ import (
 
     _ "github.com/lib/pq"
 )
+
+func migrationPaths() ([]string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	cwdMigrations := filepath.Join(cwd, "migrations")
+
+	exe, err := os.Executable()
+	if err != nil {
+		return []string{cwdMigrations}, nil
+	}
+	exeDir := filepath.Dir(exe)
+
+	exeMigrations1 := filepath.Join(exeDir, "migrations")
+	exeMigrations2 := filepath.Clean(filepath.Join(exeDir, "..", "..", "migrations"))
+
+	return []string{cwdMigrations, exeMigrations1, exeMigrations2}, nil
+}
+
+func runMigrations(db *sql.DB) {
+	dirs, err := migrationPaths()
+	if err != nil {
+		log.Fatalf("migrations: %v", err)
+	}
+
+	files := []string{
+		"0001_create_urls.sql",
+		"0002_unique_original.sql",
+		"0003_create_user_urls.sql",
+	}
+
+	var lastErr error
+	for _, dir := range dirs {
+		ok := true
+		for _, f := range files {
+			p := filepath.Join(dir, f)
+			if err := repository.RunSQLMigration(db, p); err != nil {
+				lastErr = err
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return
+		}
+	}
+
+	log.Fatalf("migrations: %v", lastErr)
+}
 
 func main() {
 	var repo repository.URLRepository
@@ -35,15 +86,7 @@ func main() {
 		}
 		db = d
 
-		if err := repository.RunSQLMigration(db, "migrations/0001_create_urls.sql"); err != nil {
-			log.Fatalf("migrations: %v", err)
-		}
-		if err := repository.RunSQLMigration(db, "migrations/0002_unique_original.sql"); err != nil {
-			log.Fatalf("migrations: %v", err)
-		}
-		if err := repository.RunSQLMigration(db, "migrations/0003_create_user_urls.sql"); err != nil {
-		    log.Fatalf("migrations: %v", err)
-		}
+		runMigrations(db)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
