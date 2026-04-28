@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/sastromikus/pip_shortener/internal/handler/middleware"
 	"github.com/sastromikus/pip_shortener/internal/service"
 )
 
@@ -42,9 +43,9 @@ func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, logger *sl
 		return
 	}
 
-	userID, err := getOrCreateUserID(w, r)
-	if err != nil {
-		internalServerError(logger, w, "create user id", err)
+	userID, ok := middleware.UserIDFromContext(r.Context())
+	if !ok {
+		internalServerError(logger, w, "get user id from request context", service.ErrStorage)
 		return
 	}
 

@@ -75,9 +75,9 @@ func handleShorten(svc *service.Shortener, baseURL string, logger *slog.Logger, 
 		return
 	}
 
-	userID, err := getOrCreateUserID(w, r)
-	if err != nil {
-		internalServerError(logger, w, "create user id", err)
+	userID, ok := middleware.UserIDFromContext(r.Context())
+	if !ok {
+		internalServerError(logger, w, "get user id from request context", service.ErrStorage)
 		return
 	}
 
