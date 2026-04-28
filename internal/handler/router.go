@@ -21,6 +21,7 @@ func NewRouter(svc *service.Shortener, baseURL string, logger *slog.Logger, db *
 	baseURL = strings.TrimRight(baseURL, "/")
 
 	r := chi.NewRouter()
+	r.Use(middleware.Auth())
 	r.Use(middleware.Gzip())
 	r.Use(middleware.Logger(logger))
 
