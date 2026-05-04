@@ -10,6 +10,8 @@ type Config struct {
 	BaseURL    string
 	FileStoragePath string
 	DatabaseDSN string
+	AuditFile string
+	AuditURL  string
 }
 
 const (
@@ -36,6 +38,8 @@ func Parse() Config {
 	var flagBase string
 	var flagFile string
 	var flagDSN string
+	var flagAuditFile string
+	var flagAuditURL string
 
 	flag.StringVar(&flagFile, "f", "", "File storage path")
 	flag.StringVar(&flagAddr, "a", "", "HTTP server address")
@@ -43,6 +47,8 @@ func Parse() Config {
 	flag.StringVar(&flagDSN, "d", "", "Database DSN")
 	flag.StringVar(&flagDSN, "database-dsn", "", "Database DSN")
 	flag.StringVar(&flagDSN, "database_dsn", "", "Database DSN")
+	flag.StringVar(&flagAuditFile, "audit-file", "", "Audit log file path")
+	flag.StringVar(&flagAuditURL, "audit-url", "", "Audit receiver URL")
 	flag.Parse()
 
 	if flagAddr != "" {
@@ -57,10 +63,16 @@ func Parse() Config {
 	if flagDSN != "" { 
 		cfg.DatabaseDSN = flagDSN 
 	}
+	if flagAuditFile != "" { 
+		cfg.AuditFile = flagAuditFile 
+	}
+	if flagAuditURL != ""  { 
+		cfg.AuditURL = flagAuditURL 
+	}
+
 	if v := os.Getenv("DATABASE_DSN"); v != "" {
 	    cfg.DatabaseDSN = v
 	}
-
 	if v := os.Getenv(envServerAddr); v != "" {
 		cfg.ServerAddr = v
 	}
@@ -72,6 +84,12 @@ func Parse() Config {
 	}
 	if v := os.Getenv(envDatabaseDSN); v != "" { 
 		cfg.DatabaseDSN = v 
+	}
+	if v := os.Getenv("AUDIT_FILE"); v != "" { 
+		cfg.AuditFile = v 
+	}
+	if v := os.Getenv("AUDIT_URL"); v != ""  { 
+		cfg.AuditURL = v 
 	}
 
 	return cfg

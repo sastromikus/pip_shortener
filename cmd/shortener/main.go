@@ -15,6 +15,7 @@ import (
 	"github.com/sastromikus/pip_shortener/internal/handler"
 	"github.com/sastromikus/pip_shortener/internal/repository"
 	"github.com/sastromikus/pip_shortener/internal/service"
+	"github.com/sastromikus/pip_shortener/internal/audit"
 
     "github.com/sirupsen/logrus"
 
@@ -75,10 +76,19 @@ func runMigrations(db *sql.DB) {
 func main() {
 	var repo repository.URLRepository
 	var db *sql.DB
+	var observers []audit.Observer
 
 	cfg := config.Parse()
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)
+
+	if cfg.AuditFile != "" {
+		observers = append(observers, audit.NewFileObserver(cfg.AuditFile))
+	}
+	if cfg.AuditURL != "" {
+		observers = append(observers, audit.NewHTTPObserver(cfg.AuditURL))
+	}
+	auditor := audit.NewNotifier(observers...)
 
 	if cfg.DatabaseDSN != "" {
 		d, err := sql.Open("postgres", cfg.DatabaseDSN)
@@ -109,7 +119,7 @@ func main() {
 
 	svc := service.NewShortener(repo)
 	svc.StartDeleteWorker(128, 500 * time.Millisecond)
-	router := handler.NewRouter(svc, cfg.BaseURL, logger, db)
+	router := handler.NewRouter(svc, cfg.BaseURL, logger, db, auditor)
 
 	srv := &http.Server{
 	    Addr: cfg.ServerAddr,

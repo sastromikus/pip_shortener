@@ -7,17 +7,17 @@ import (
 	"strings"
     "database/sql"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/sastromikus/pip_shortener/internal/service"
-
-    "github.com/sirupsen/logrus"
     "github.com/sastromikus/pip_shortener/internal/handler/middleware"
+    "github.com/sastromikus/pip_shortener/internal/audit"
+
+    "github.com/go-chi/chi/v5"
+    "github.com/sirupsen/logrus"
 )
 
 const maxPOSTBody = 8 << 10 
 
-func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger, db *sql.DB) http.Handler {
+func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger, db *sql.DB, auditor *audit.Notifier) http.Handler {
     baseURL = strings.TrimRight(baseURL, "/")
 
     r := chi.NewRouter()
@@ -29,11 +29,11 @@ func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger, db
     r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) { badRequest(w) })
 
     r.Post("/", func(w http.ResponseWriter, r *http.Request) {
-        handleShorten(svc, baseURL, w, r)
+        handleShorten(svc, baseURL, w, r, auditor)
     })
 
     r.Post("/api/shorten", func(w http.ResponseWriter, r *http.Request) {
-        handleAPIPostShortenJSON(svc, baseURL, w, r)
+        handleAPIPostShortenJSON(svc, baseURL, w, r, auditor)
     })
 
     r.Post("/api/shorten/batch", func(w http.ResponseWriter, r *http.Request) {
@@ -54,13 +54,13 @@ func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger, db
 
     r.Get("/{id}", func(w http.ResponseWriter, r *http.Request) {
         id := chi.URLParam(r, "id")
-        handleRedirect(svc, id, w, r)
+        handleRedirect(svc, id, w, r, auditor)
     })
 
     return r
 }
 
-func handleShorten(svc *service.Shortener, baseURL string, w http.ResponseWriter, r *http.Request) {
+func handleShorten(svc *service.Shortener, baseURL string, w http.ResponseWriter, r *http.Request, auditor *audit.Notifier) {
     ct := r.Header.Get("Content-Type")
     if ct == "" || !strings.HasPrefix(strings.ToLower(ct), "text/plain") {
         badRequest(w)
@@ -86,6 +86,14 @@ func handleShorten(svc *service.Shortener, baseURL string, w http.ResponseWriter
         return
     }
 
+    if auditor != nil {
+        auditor.NotifyAllAsync(r.Context(), audit.Event{
+            Action: "shorten",
+            UserID: userID,
+            URL:    raw,
+        })
+    }
+
     shortURL := baseURL + "/" + id
 
     w.Header().Set("Content-Type", "text/plain")
@@ -97,7 +105,7 @@ func handleShorten(svc *service.Shortener, baseURL string, w http.ResponseWriter
     _, _ = w.Write([]byte(shortURL))
 }
 
-func handleRedirect(svc *service.Shortener, id string, w http.ResponseWriter, r *http.Request) {
+func handleRedirect(svc *service.Shortener, id string, w http.ResponseWriter, r *http.Request, auditor *audit.Notifier) {
     original, ok, deleted := svc.ResolveWithDeleted(id)
     if !ok {
         badRequest(w)
@@ -106,6 +114,15 @@ func handleRedirect(svc *service.Shortener, id string, w http.ResponseWriter, r 
     if deleted {
         w.WriteHeader(http.StatusGone)
         return
+    }
+
+    userID, _ := middleware.UserIDFromContext(r.Context())
+    if auditor != nil {
+        auditor.NotifyAllAsync(r.Context(), audit.Event{
+            Action: "follow",
+            UserID: userID,
+            URL:    original,
+        })
     }
 
     w.Header().Set("Location", original)
