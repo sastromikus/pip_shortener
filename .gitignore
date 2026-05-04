@@ -27,3 +27,6 @@ storage.json.users
 $path
 profiles/*.pprof
 
+
+profiles/*.pprof
+
