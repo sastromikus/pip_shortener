@@ -6,7 +6,7 @@ import (
 )
 
 type Event struct {
-	Ts     int64  `json:"ts"`
+	TS     int64  `json:"ts"`
 	Action string `json:"action"`
 	UserID string `json:"user_id,omitempty"`
 	URL    string `json:"url"`
@@ -33,8 +33,8 @@ func (n *Notifier) NotifyAllAsync(ctx context.Context, e Event) {
 		return
 	}
 
-	if e.Ts == 0 {
-		e.Ts = time.Now().Unix()
+	if e.TS == 0 {
+		e.TS = time.Now().Unix()
 	}
 
 	for _, obs := range n.observers {
