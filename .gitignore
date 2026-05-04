@@ -10,6 +10,7 @@
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
+profiles/*.pprof
 
 # Binaries
 cmd/shortener/main
@@ -24,3 +25,5 @@ vendor/
 storage.json
 storage.json.users
 $path
+profiles/*.pprof
+
