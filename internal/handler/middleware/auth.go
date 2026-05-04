@@ -91,25 +91,38 @@ func buildCookie(uid string, secret []byte) *http.Cookie {
 func signCookie(uid string, secret []byte) string {
 	mac := hmac.New(sha256.New, secret)
 	_, _ = mac.Write([]byte(uid))
-	sig := hex.EncodeToString(mac.Sum(nil))
+	sum := mac.Sum(nil)
 
-	return uid + ":" + sig
+	out := make([]byte, 0, len(uid)+1+hex.EncodedLen(len(sum)))
+	out = append(out, uid...)
+	out = append(out, ':')
+
+	dst := make([]byte, hex.EncodedLen(len(sum)))
+	hex.Encode(dst, sum)
+	out = append(out, dst...)
+
+	return string(out)
 }
 
 func verifyCookie(val string, secret []byte) (string, bool) {
-	parts := strings.Split(val, ":")
-	if len(parts) != 2 {
-		return "", false
-	}
-	uid := parts[0]
-	sig := parts[1]
-	if uid == "" || sig == "" {
+	uid, sigHex, ok := strings.Cut(val, ":")
+	if !ok || uid == "" || sigHex == "" {
 		return "", false
 	}
 
-	want := signCookie(uid, secret)
-	
-	return uid, hmac.Equal([]byte(want), []byte(uid+":"+sig))
+	sig, err := hex.DecodeString(sigHex)
+	if err != nil {
+		return "", false
+	}
+
+	mac := hmac.New(sha256.New, secret)
+	_, _ = mac.Write([]byte(uid))
+	sum := mac.Sum(nil)
+
+	if !hmac.Equal(sum, sig) {
+		return "", false
+	}
+	return uid, true
 }
 
 func newUserID() string {
