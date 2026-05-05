@@ -26,13 +26,25 @@ func Example_postTextPlain() {
 	ts := httptest.NewServer(h)
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader("http://example.com"))
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/", strings.NewReader("http://example.com"))
+	if err != nil {
+		fmt.Println("request error")
+		return
+	}
 	req.Header.Set("Content-Type", "text/plain")
 
-	res, _ := http.DefaultClient.Do(req)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fmt.Println("request error")
+		return
+	}
 	defer res.Body.Close()
 
-	b, _ := io.ReadAll(res.Body)
+	b, err := io.ReadAll(res.Body)
+	if err != nil {
+		fmt.Println("read error")
+		return
+	}
 
 	fmt.Println(res.StatusCode)
 	fmt.Println(strings.HasPrefix(string(b), "http://example/"))
@@ -55,13 +67,25 @@ func Example_postJSON() {
 	defer ts.Close()
 
 	payload := []byte(`{"url":"https://practicum.yandex.ru/"}`)
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/shorten", bytes.NewReader(payload))
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/shorten", bytes.NewReader(payload))
+	if err != nil {
+		fmt.Println("request error")
+		return
+	}
 	req.Header.Set("Content-Type", "application/json")
 
-	res, _ := http.DefaultClient.Do(req)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		fmt.Println("request error")
+		return
+	}
 	defer res.Body.Close()
 
-	b, _ := io.ReadAll(res.Body)
+	b, err := io.ReadAll(res.Body)
+	if err != nil {
+		fmt.Println("read error")
+		return
+	}
 	s := string(b)
 
 	fmt.Println(res.StatusCode)
