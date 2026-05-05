@@ -17,6 +17,9 @@ import (
 
 const maxPOSTBody = 8 << 10
 
+// NewRouter builds an HTTP router with all service endpoints.
+// baseURL is used as a prefix for generated short links.
+// auditor may be nil to disable audit events.
 func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger, db *sql.DB, auditor *audit.Notifier) http.Handler {
 	baseURL = strings.TrimRight(baseURL, "/")
 

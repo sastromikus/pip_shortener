@@ -5,6 +5,7 @@ import (
 	"time"
 )
 
+// Event describes a single audit event emitted by the service.
 type Event struct {
 	TS     int64  `json:"ts"`
 	Action string `json:"action"`
@@ -12,14 +13,18 @@ type Event struct {
 	URL    string `json:"url"`
 }
 
+// Observer receives audit events from Notifier.
 type Observer interface {
 	Notify(ctx context.Context, e Event) error
 }
 
+// Notifier broadcasts audit events to all configured observers.
 type Notifier struct {
 	observers []Observer
 }
 
+// NewNotifier creates a Notifier with the provided observers.
+// If no observers are provided, the notifier is effectively disabled.
 func NewNotifier(observers ...Observer) *Notifier {
 	return &Notifier{observers: observers}
 }

@@ -5,6 +5,7 @@ import (
 	"os"
 )
 
+// Config holds application configuration derived from flags and environment variables.
 type Config struct {
 	ServerAddr      string
 	BaseURL         string
@@ -27,6 +28,7 @@ const (
 	envDatabaseDSN = "DATABASE_DSN"
 )
 
+// Parse reads flags and environment variables and returns the resulting configuration.
 func Parse() Config {
 	cfg := Config{
 		ServerAddr:      defaultServerAddr,

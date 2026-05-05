@@ -15,28 +15,33 @@ const (
 	stringbase = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 )
 
+// URLRepository is the subset of repository operations required by Shortener.
 type URLRepository interface {
 	Get(id string) (string, bool)
 	Put(id string, original string)
 	Exists(id string) bool
 }
 
+// Shortener implements URL shortening business logic.
 type Shortener struct {
 	repo     repository.URLRepository
 	deleteCh chan DeleteTask
 }
 
+// DeleteTask represents a request to delete multiple short URLs for a user.
 type DeleteTask struct {
 	UserID string
 	IDs    []string
 }
 
+// NewShortener creates a new Shortener using the provided repository.
 func NewShortener(repo repository.URLRepository) *Shortener {
 	s := &Shortener{repo: repo, deleteCh: make(chan DeleteTask, 1024)}
 
 	return s
 }
 
+// Shorten creates or returns a short id for the provided URL.
 func (s *Shortener) Shorten(raw string) (string, error) {
 	id, _, err := s.ShortenWithExisting(raw)
 	return id, err
@@ -94,6 +99,7 @@ func (s *Shortener) ShortenWithExisting(raw string) (string, bool, error) {
 	return id, false, nil
 }
 
+// ShortenForUser creates a short URL and associates it with user if userID is provided.
 func (s *Shortener) ShortenForUser(raw, userID string) (string, bool, error) {
 	id, existed, err := s.ShortenWithExisting(raw)
 	if err != nil {
@@ -111,6 +117,7 @@ func (s *Shortener) ShortenForUser(raw, userID string) (string, bool, error) {
 	return id, existed, nil
 }
 
+// ListUserURLs returns all URLs created by the given user.
 func (s *Shortener) ListUserURLs(userID string) ([]repository.UserURL, error) {
 	us, ok := s.repo.(interface {
 		ListUserURLs(userID string) ([]repository.UserURL, error)
@@ -168,6 +175,7 @@ func validateURL(raw string) error {
 	return nil
 }
 
+// EnqueueDelete queues an asynchronous delete request.
 func (s *Shortener) EnqueueDelete(userID string, ids []string) {
 	if userID == "" || len(ids) == 0 {
 		return
@@ -179,6 +187,7 @@ func (s *Shortener) EnqueueDelete(userID string, ids []string) {
 	}
 }
 
+// StartDeleteWorker starts background processing of delete tasks.
 func (s *Shortener) StartDeleteWorker(batchSize int, flushEvery time.Duration) {
 	pg, ok := s.repo.(*repository.PostgresRepository)
 	if !ok {
@@ -254,6 +263,7 @@ func (s *Shortener) StartDeleteWorker(batchSize int, flushEvery time.Duration) {
 	}()
 }
 
+// ResolveWithDeleted resolves a short id and reports whether it was deleted.
 func (s *Shortener) ResolveWithDeleted(id string) (string, bool, bool) {
 	if pg, ok := s.repo.(*repository.PostgresRepository); ok {
 		return pg.GetWithDeleted(id)

@@ -23,6 +23,7 @@ const (
 	ctxBadCookieKey
 )
 
+// UserIDFromContext returns user id stored in request context by Auth middleware.
 func UserIDFromContext(ctx context.Context) (string, bool) {
 	v := ctx.Value(ctxUserIDKey)
 	s, _ := v.(string)
@@ -30,6 +31,7 @@ func UserIDFromContext(ctx context.Context) (string, bool) {
 	return s, s != ""
 }
 
+// BadCookieNoID reports whether a request contained a user_id cookie without a valid user id.
 func BadCookieNoID(ctx context.Context) bool {
 	v := ctx.Value(ctxBadCookieKey)
 	b, _ := v.(bool)
@@ -37,6 +39,7 @@ func BadCookieNoID(ctx context.Context) bool {
 	return b
 }
 
+// Auth ensures a signed user_id cookie exists and stores user id in request context.
 func Auth() func(http.Handler) http.Handler {
 	secret := []byte(os.Getenv("COOKIE_SECRET"))
 	if len(secret) == 0 {

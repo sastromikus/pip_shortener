@@ -2,18 +2,21 @@ package repository
 
 import "sync"
 
+// URLRepository defines a storage backend for short URL mappings.
 type URLRepository interface {
 	Get(id string) (string, bool)
 	Put(id string, original string)
 	Exists(id string) bool
 }
 
+// MemoryRepository stores URL mappings in memory.
 type MemoryRepository struct {
 	mu   sync.RWMutex
 	data map[string]string
 	user map[string]map[string]struct{}
 }
 
+// NewMemoryRepository creates a new in-memory repository.
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
 		data: make(map[string]string),

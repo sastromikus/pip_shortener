@@ -63,6 +63,7 @@ func shouldCompressContentType(ct string) bool {
 	return strings.HasPrefix(ct, "application/json") || strings.HasPrefix(ct, "text/html")
 }
 
+// Gzip enables gzip support for requests and responses where applicable.
 func Gzip() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

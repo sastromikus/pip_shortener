@@ -5,6 +5,7 @@ import (
 	"os"
 )
 
+// RunSQLMigration executes SQL statements from a file against the provided database.
 func RunSQLMigration(db *sql.DB, path string) error {
 	b, err := os.ReadFile(path)
 	if err != nil {

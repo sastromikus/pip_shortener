@@ -7,20 +7,24 @@ import (
 	"github.com/lib/pq"
 )
 
+// PostgresRepository stores URL mappings in PostgreSQL.
 type PostgresRepository struct {
 	db *sql.DB
 }
 
+// UserURL represents a user-owned short URL mapping.
 type UserURL struct {
 	ShortID  string
 	Original string
 }
 
+// UserURLStore provides operations for user-owned URL mappings.
 type UserURLStore interface {
 	AddUserURL(userID, shortID string) error
 	ListUserURLs(userID string) ([]UserURL, error)
 }
 
+// NewPostgresRepository creates a PostgreSQL-backed repository.
 func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
@@ -81,6 +85,8 @@ func (r *PostgresRepository) Insert(id, original string) error {
 	return err
 }
 
+// IsUniqueViolationOn reports whether err is a unique constraint violation
+// for the given constraint name.
 func IsUniqueViolationOn(err error, constraint string) bool {
 	pqe, ok := err.(*pq.Error)
 	if !ok {

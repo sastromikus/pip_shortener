@@ -8,6 +8,7 @@ import (
 	"sync"
 )
 
+// FileRepository stores URL mappings on disk as JSON.
 type FileRepository struct {
 	mu   sync.RWMutex
 	path string
@@ -24,6 +25,7 @@ type fileRecord struct {
 	OriginalURL string `json:"original_url"`
 }
 
+// NewFileRepository creates a file-backed repository and loads data if the file exists.
 func NewFileRepository(path string) (*FileRepository, error) {
 	if path == "" {
 		return nil, errors.New("empty file storage path")

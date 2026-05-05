@@ -7,11 +7,13 @@ import (
 	"sync"
 )
 
+// FileObserver appends audit events to a file as JSON lines.
 type FileObserver struct {
 	mu   sync.Mutex
 	path string
 }
 
+// NewFileObserver creates a file-based audit observer.
 func NewFileObserver(path string) *FileObserver {
 	return &FileObserver{path: path}
 }
