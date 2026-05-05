@@ -30,17 +30,17 @@ func NewFileRepository(path string) (*FileRepository, error) {
 	}
 
 	r := &FileRepository{
-	    path:      path,
-	    data:      make(map[string]string),
-	    usersPath: path + ".users",
-	    user:      make(map[string]map[string]struct{}),
+		path:      path,
+		data:      make(map[string]string),
+		usersPath: path + ".users",
+		user:      make(map[string]map[string]struct{}),
 	}
 
 	if err := r.load(); err != nil {
-	    return nil, err
+		return nil, err
 	}
 	if err := r.loadUsers(); err != nil {
-	    return nil, err
+		return nil, err
 	}
 
 	if err := r.load(); err != nil {
@@ -168,7 +168,7 @@ func itoa(n int) string {
 	for i, j := 0, len(buf)-1; i < j; i, j = i+1, j-1 {
 		buf[i], buf[j] = buf[j], buf[i]
 	}
-	
+
 	return string(buf)
 }
 
@@ -241,7 +241,7 @@ func (r *FileRepository) AddUserURL(userID, shortID string) error {
 		r.user[userID] = set
 	}
 	set[shortID] = struct{}{}
-	
+
 	return r.saveUsersLocked()
 }
 

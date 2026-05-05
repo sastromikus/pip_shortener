@@ -74,6 +74,6 @@ func (r *MemoryRepository) ListUserURLs(userID string) ([]UserURL, error) {
 		}
 		out = append(out, UserURL{ShortID: shortID, Original: orig})
 	}
-	
+
 	return out, nil
 }

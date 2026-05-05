@@ -84,7 +84,7 @@ func buildCookie(uid string, secret []byte) *http.Cookie {
 		Value:    val,
 		Path:     "/",
 		HttpOnly: true,
-		Expires: time.Now().Add(365 * 24 * time.Hour),
+		Expires:  time.Now().Add(365 * 24 * time.Hour),
 	}
 }
 
@@ -128,6 +128,6 @@ func verifyCookie(val string, secret []byte) (string, bool) {
 func newUserID() string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
-	
+
 	return hex.EncodeToString(b)
 }

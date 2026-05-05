@@ -5,13 +5,13 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/sastromikus/pip_shortener/internal/service"
-	"github.com/sastromikus/pip_shortener/internal/handler/middleware"
 	"github.com/sastromikus/pip_shortener/internal/audit"
+	"github.com/sastromikus/pip_shortener/internal/handler/middleware"
+	"github.com/sastromikus/pip_shortener/internal/service"
 )
 
 type apiShortenRequest struct {
-    URL string `json:"url"`
+	URL string `json:"url"`
 }
 
 type apiShortenResponse struct {
@@ -51,11 +51,11 @@ func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, w http.Res
 	}
 
 	if auditor != nil {
-	    auditor.NotifyAllAsync(r.Context(), audit.Event{
-	        Action: "shorten",
-	        UserID: userID,
-	        URL:    raw,
-	    })
+		auditor.NotifyAllAsync(r.Context(), audit.Event{
+			Action: "shorten",
+			UserID: userID,
+			URL:    raw,
+		})
 	}
 
 	shortURL := strings.TrimRight(baseURL, "/") + "/" + id

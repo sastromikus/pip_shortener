@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	idLen  = 8
+	idLen      = 8
 	stringbase = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 )
 
@@ -22,13 +22,13 @@ type URLRepository interface {
 }
 
 type Shortener struct {
-    repo repository.URLRepository
-    deleteCh chan DeleteTask
+	repo     repository.URLRepository
+	deleteCh chan DeleteTask
 }
 
 type DeleteTask struct {
-    UserID string
-    IDs    []string
+	UserID string
+	IDs    []string
 }
 
 func NewShortener(repo repository.URLRepository) *Shortener {
@@ -95,31 +95,31 @@ func (s *Shortener) ShortenWithExisting(raw string) (string, bool, error) {
 }
 
 func (s *Shortener) ShortenForUser(raw, userID string) (string, bool, error) {
-    id, existed, err := s.ShortenWithExisting(raw)
-    if err != nil {
-        return "", false, err
-    }
+	id, existed, err := s.ShortenWithExisting(raw)
+	if err != nil {
+		return "", false, err
+	}
 
-    if userID != "" {
-        if us, ok := s.repo.(interface {
-            AddUserURL(userID, shortID string) error
-        }); ok {
-            _ = us.AddUserURL(userID, id)
-        }
-    }
+	if userID != "" {
+		if us, ok := s.repo.(interface {
+			AddUserURL(userID, shortID string) error
+		}); ok {
+			_ = us.AddUserURL(userID, id)
+		}
+	}
 
-    return id, existed, nil
+	return id, existed, nil
 }
 
 func (s *Shortener) ListUserURLs(userID string) ([]repository.UserURL, error) {
-    us, ok := s.repo.(interface {
-        ListUserURLs(userID string) ([]repository.UserURL, error)
-    })
-    if !ok {
-        return nil, nil
-    }
-    
-    return us.ListUserURLs(userID)
+	us, ok := s.repo.(interface {
+		ListUserURLs(userID string) ([]repository.UserURL, error)
+	})
+	if !ok {
+		return nil, nil
+	}
+
+	return us.ListUserURLs(userID)
 }
 
 func (s *Shortener) Resolve(id string) (string, bool) {
@@ -169,97 +169,97 @@ func validateURL(raw string) error {
 }
 
 func (s *Shortener) EnqueueDelete(userID string, ids []string) {
-    if userID == "" || len(ids) == 0 {
-        return
-    }
+	if userID == "" || len(ids) == 0 {
+		return
+	}
 
-    select {
-    	case s.deleteCh <- DeleteTask{UserID: userID, IDs: ids}:
-    	default:
-    }
+	select {
+	case s.deleteCh <- DeleteTask{UserID: userID, IDs: ids}:
+	default:
+	}
 }
 
 func (s *Shortener) StartDeleteWorker(batchSize int, flushEvery time.Duration) {
-    pg, ok := s.repo.(*repository.PostgresRepository)
-    if !ok {
-        return
-    }
+	pg, ok := s.repo.(*repository.PostgresRepository)
+	if !ok {
+		return
+	}
 
-    if batchSize <= 0 {
-        batchSize = 64
-    }
-    if flushEvery <= 0 {
-        flushEvery = 500 * time.Millisecond
-    }
+	if batchSize <= 0 {
+		batchSize = 64
+	}
+	if flushEvery <= 0 {
+		flushEvery = 500 * time.Millisecond
+	}
 
-    go func() {
-        type bucket struct {
-            ids map[string]struct{}
-        }
+	go func() {
+		type bucket struct {
+			ids map[string]struct{}
+		}
 
-        pending := make(map[string]map[string]struct{})
+		pending := make(map[string]map[string]struct{})
 
-        flush := func() {
-            for userID, set := range pending {
-                if len(set) == 0 {
-                    continue
-                }
-                ids := make([]string, 0, len(set))
-                for id := range set {
-                    ids = append(ids, id)
-                }
-                _ = pg.MarkDeleted(userID, ids)
-                delete(pending, userID)
-            }
-        }
+		flush := func() {
+			for userID, set := range pending {
+				if len(set) == 0 {
+					continue
+				}
+				ids := make([]string, 0, len(set))
+				for id := range set {
+					ids = append(ids, id)
+				}
+				_ = pg.MarkDeleted(userID, ids)
+				delete(pending, userID)
+			}
+		}
 
-        ticker := time.NewTicker(flushEvery)
-        defer ticker.Stop()
+		ticker := time.NewTicker(flushEvery)
+		defer ticker.Stop()
 
-        count := 0
-        for {
-            select {
-				case task, ok := <-s.deleteCh:
-				    if !ok { 
-				    	return 
-				 	}
-	                if task.UserID == "" || len(task.IDs) == 0 {
-	                    continue
-	                }
-	                set := pending[task.UserID]
-	                if set == nil {
-	                    set = make(map[string]struct{})
-	                    pending[task.UserID] = set
-	                }
-	                for _, id := range task.IDs {
-	                    id = strings.TrimSpace(id)
-	                    if id == "" {
-	                        continue
-	                    }
-	                    set[id] = struct{}{}
-	                    count++
-	                }
-	                if count >= batchSize {
-	                    flush()
-	                    count = 0
-	                }
+		count := 0
+		for {
+			select {
+			case task, ok := <-s.deleteCh:
+				if !ok {
+					return
+				}
+				if task.UserID == "" || len(task.IDs) == 0 {
+					continue
+				}
+				set := pending[task.UserID]
+				if set == nil {
+					set = make(map[string]struct{})
+					pending[task.UserID] = set
+				}
+				for _, id := range task.IDs {
+					id = strings.TrimSpace(id)
+					if id == "" {
+						continue
+					}
+					set[id] = struct{}{}
+					count++
+				}
+				if count >= batchSize {
+					flush()
+					count = 0
+				}
 
-	            case <-ticker.C:
-	                if count > 0 {
-	                    flush()
-	                    count = 0
-	                }
-            }
-        }
-    }()
+			case <-ticker.C:
+				if count > 0 {
+					flush()
+					count = 0
+				}
+			}
+		}
+	}()
 }
 
 func (s *Shortener) ResolveWithDeleted(id string) (string, bool, bool) {
-    if pg, ok := s.repo.(*repository.PostgresRepository); ok {
-        return pg.GetWithDeleted(id)
-    }
+	if pg, ok := s.repo.(*repository.PostgresRepository); ok {
+		return pg.GetWithDeleted(id)
+	}
 
-    original, ok := s.repo.Get(id)
+	original, ok := s.repo.Get(id)
 
-    return original, ok, false
+	return original, ok, false
 }
