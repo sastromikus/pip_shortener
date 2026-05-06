@@ -106,7 +106,7 @@ func runMigrations(db *sql.DB) error {
 
 func main() {
 	printBuildInfo()
-	
+
 	var repo repository.URLRepository
 	var db *sql.DB
 	var observers []audit.Observer
