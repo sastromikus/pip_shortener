@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+	"fmt"
+	"errors"
 
 	"github.com/sastromikus/pip_shortener/internal/audit"
 	"github.com/sastromikus/pip_shortener/internal/config"
@@ -41,10 +43,10 @@ func migrationPaths() ([]string, error) {
 	return []string{cwdMigrations, exeMigrations1, exeMigrations2}, nil
 }
 
-func runMigrations(db *sql.DB) {
+func runMigrations(db *sql.DB) error {
 	dirs, err := migrationPaths()
 	if err != nil {
-		log.Fatalf("migrations: %v", err)
+		return fmt.Errorf("migrations: %w", err)
 	}
 
 	files := []string{
@@ -66,11 +68,15 @@ func runMigrations(db *sql.DB) {
 			}
 		}
 		if ok {
-			return
+			return nil
 		}
 	}
 
-	log.Fatalf("migrations: %v", lastErr)
+	if lastErr == nil {
+		lastErr = errors.New("no migrations were applied")
+	}
+
+	return fmt.Errorf("migrations: %w", lastErr)
 }
 
 func main() {
@@ -97,7 +103,9 @@ func main() {
 		}
 		db = d
 
-		runMigrations(db)
+		if err := runMigrations(db); err != nil {
+			log.Fatal(err)
+		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
