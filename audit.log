@@ -1,0 +1,4 @@
+{"ts":1777920533,"action":"shorten","user_id":"ffc2eb2cb150a429610f723604ea144f","url":"http://example.com"}
+{"ts":1777920564,"action":"follow","user_id":"9a862d019a93e654c974f8ee5467b177","url":"http://example.com"}
+{"ts":1777920574,"action":"shorten","user_id":"82cf3ee4c64b3b5fbfd24939ccc65a90","url":"https://practicum.yandex.ru"}
+{"ts":1777920627,"action":"follow","user_id":"bddef48623c83a955b8f2e1f9171129b","url":"http://example.com"}

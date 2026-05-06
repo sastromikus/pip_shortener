@@ -5,30 +5,34 @@ import (
 	"os"
 )
 
+// Config holds application configuration derived from flags and environment variables.
 type Config struct {
-	ServerAddr string
-	BaseURL    string
+	ServerAddr      string
+	BaseURL         string
 	FileStoragePath string
-	DatabaseDSN string
+	DatabaseDSN     string
+	AuditFile       string
+	AuditURL        string
 }
 
 const (
-	defaultServerAddr 		= "localhost:8080"
-	defaultBaseURL    		= "http://localhost:8080"
+	defaultServerAddr = "localhost:8080"
+	defaultBaseURL    = "http://localhost:8080"
 
-	envServerAddr 			= "SERVER_ADDRESS"
-	envBaseURL    			= "BASE_URL"
+	envServerAddr = "SERVER_ADDRESS"
+	envBaseURL    = "BASE_URL"
 
-	defaultFileStoragePath 	= "storage.json"
-	envFileStoragePath 		= "FILE_STORAGE_PATH"
+	defaultFileStoragePath = "storage.json"
+	envFileStoragePath     = "FILE_STORAGE_PATH"
 
 	envDatabaseDSN = "DATABASE_DSN"
 )
 
+// Parse reads flags and environment variables and returns the resulting configuration.
 func Parse() Config {
 	cfg := Config{
 		ServerAddr:      defaultServerAddr,
-		BaseURL:		 defaultBaseURL,
+		BaseURL:         defaultBaseURL,
 		FileStoragePath: defaultFileStoragePath,
 	}
 
@@ -36,6 +40,8 @@ func Parse() Config {
 	var flagBase string
 	var flagFile string
 	var flagDSN string
+	var flagAuditFile string
+	var flagAuditURL string
 
 	flag.StringVar(&flagFile, "f", "", "File storage path")
 	flag.StringVar(&flagAddr, "a", "", "HTTP server address")
@@ -43,6 +49,8 @@ func Parse() Config {
 	flag.StringVar(&flagDSN, "d", "", "Database DSN")
 	flag.StringVar(&flagDSN, "database-dsn", "", "Database DSN")
 	flag.StringVar(&flagDSN, "database_dsn", "", "Database DSN")
+	flag.StringVar(&flagAuditFile, "audit-file", "", "Audit log file path")
+	flag.StringVar(&flagAuditURL, "audit-url", "", "Audit receiver URL")
 	flag.Parse()
 
 	if flagAddr != "" {
@@ -54,13 +62,19 @@ func Parse() Config {
 	if flagFile != "" {
 		cfg.FileStoragePath = flagFile
 	}
-	if flagDSN != "" { 
-		cfg.DatabaseDSN = flagDSN 
+	if flagDSN != "" {
+		cfg.DatabaseDSN = flagDSN
 	}
-	if v := os.Getenv("DATABASE_DSN"); v != "" {
-	    cfg.DatabaseDSN = v
+	if flagAuditFile != "" {
+		cfg.AuditFile = flagAuditFile
+	}
+	if flagAuditURL != "" {
+		cfg.AuditURL = flagAuditURL
 	}
 
+	if v := os.Getenv("DATABASE_DSN"); v != "" {
+		cfg.DatabaseDSN = v
+	}
 	if v := os.Getenv(envServerAddr); v != "" {
 		cfg.ServerAddr = v
 	}
@@ -70,8 +84,14 @@ func Parse() Config {
 	if v := os.Getenv(envFileStoragePath); v != "" {
 		cfg.FileStoragePath = v
 	}
-	if v := os.Getenv(envDatabaseDSN); v != "" { 
-		cfg.DatabaseDSN = v 
+	if v := os.Getenv(envDatabaseDSN); v != "" {
+		cfg.DatabaseDSN = v
+	}
+	if v := os.Getenv("AUDIT_FILE"); v != "" {
+		cfg.AuditFile = v
+	}
+	if v := os.Getenv("AUDIT_URL"); v != "" {
+		cfg.AuditURL = v
 	}
 
 	return cfg

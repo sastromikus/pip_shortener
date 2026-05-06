@@ -2,24 +2,52 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
-	"database/sql"
-	"path/filepath"
 
+	"github.com/sastromikus/pip_shortener/internal/audit"
 	"github.com/sastromikus/pip_shortener/internal/config"
 	"github.com/sastromikus/pip_shortener/internal/handler"
 	"github.com/sastromikus/pip_shortener/internal/repository"
 	"github.com/sastromikus/pip_shortener/internal/service"
 
-    "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 
-    _ "github.com/lib/pq"
+	_ "github.com/lib/pq"
 )
+
+var buildVersion string
+var buildDate string
+var buildCommit string
+
+func printBuildInfo() {
+	v := buildVersion
+	if v == "" {
+		v = "N/A"
+	}
+
+	d := buildDate
+	if d == "" {
+		d = "N/A"
+	}
+
+	c := buildCommit
+	if c == "" {
+		c = "N/A"
+	}
+
+	fmt.Printf("Build version: %s\n", v)
+	fmt.Printf("Build date: %s\n", d)
+	fmt.Printf("Build commit: %s\n", c)
+}
 
 func migrationPaths() ([]string, error) {
 	cwd, err := os.Getwd()
@@ -40,10 +68,10 @@ func migrationPaths() ([]string, error) {
 	return []string{cwdMigrations, exeMigrations1, exeMigrations2}, nil
 }
 
-func runMigrations(db *sql.DB) {
+func runMigrations(db *sql.DB) error {
 	dirs, err := migrationPaths()
 	if err != nil {
-		log.Fatalf("migrations: %v", err)
+		return fmt.Errorf("migrations: %w", err)
 	}
 
 	files := []string{
@@ -65,20 +93,35 @@ func runMigrations(db *sql.DB) {
 			}
 		}
 		if ok {
-			return
+			return nil
 		}
 	}
 
-	log.Fatalf("migrations: %v", lastErr)
+	if lastErr == nil {
+		lastErr = errors.New("no migrations were applied")
+	}
+
+	return fmt.Errorf("migrations: %w", lastErr)
 }
 
 func main() {
+	printBuildInfo()
+
 	var repo repository.URLRepository
 	var db *sql.DB
+	var observers []audit.Observer
 
 	cfg := config.Parse()
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)
+
+	if cfg.AuditFile != "" {
+		observers = append(observers, audit.NewFileObserver(cfg.AuditFile))
+	}
+	if cfg.AuditURL != "" {
+		observers = append(observers, audit.NewHTTPObserver(cfg.AuditURL))
+	}
+	auditor := audit.NewNotifier(observers...)
 
 	if cfg.DatabaseDSN != "" {
 		d, err := sql.Open("postgres", cfg.DatabaseDSN)
@@ -87,7 +130,9 @@ func main() {
 		}
 		db = d
 
-		runMigrations(db)
+		if err := runMigrations(db); err != nil {
+			log.Fatal(err)
+		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -108,12 +153,12 @@ func main() {
 	}
 
 	svc := service.NewShortener(repo)
-	svc.StartDeleteWorker(128, 500 * time.Millisecond)
-	router := handler.NewRouter(svc, cfg.BaseURL, logger, db)
+	svc.StartDeleteWorker(128, 500*time.Millisecond)
+	router := handler.NewRouter(svc, cfg.BaseURL, logger, db, auditor)
 
 	srv := &http.Server{
-	    Addr: cfg.ServerAddr,
-	    Handler: router,
+		Addr:    cfg.ServerAddr,
+		Handler: router,
 	}
 
 	go func() {
@@ -131,7 +176,7 @@ func main() {
 	defer cancel()
 
 	if db != nil {
-	    _ = db.Close()
+		_ = db.Close()
 	}
 
 	_ = srv.Shutdown(ctx)

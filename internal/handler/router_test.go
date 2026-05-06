@@ -3,7 +3,7 @@ package handler
 import (
 	"bytes"
 	"compress/gzip"
-    "encoding/json"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,7 +13,7 @@ import (
 	"github.com/sastromikus/pip_shortener/internal/repository"
 	"github.com/sastromikus/pip_shortener/internal/service"
 
-    "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 )
 
 func TestPOST_Shorten_Returns201AndShortURL(t *testing.T) {
@@ -21,7 +21,7 @@ func TestPOST_Shorten_Returns201AndShortURL(t *testing.T) {
 	svc := service.NewShortener(repo)
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)
-	h := NewRouter(svc, "http://localhost:8080", logger, nil)
+	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/", strings.NewReader("https://practicum.yandex.ru/"))
 	req.Header.Set("Content-Type", "text/plain")
@@ -63,7 +63,7 @@ func TestGET_Redirect_Returns307AndLocation(t *testing.T) {
 	svc := service.NewShortener(repo)
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)
-	h := NewRouter(svc, "http://localhost:8080", logger, nil)
+	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil)
 
 	const id = "TESTID12"
 	const original = "https://example.com/path"
@@ -89,7 +89,7 @@ func TestInvalidRequests_Return400(t *testing.T) {
 	svc := service.NewShortener(repo)
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)
-	h := NewRouter(svc, "http://localhost:8080", logger, nil)
+	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil)
 
 	tests := []struct {
 		name string
@@ -145,50 +145,50 @@ func TestInvalidRequests_Return400(t *testing.T) {
 }
 
 func TestPOST_APIShorten_ReturnsJSON(t *testing.T) {
-    repo := repository.NewMemoryRepository()
-    svc := service.NewShortener(repo)
+	repo := repository.NewMemoryRepository()
+	svc := service.NewShortener(repo)
 
-    baseURL := "http://localhost:8080"
+	baseURL := "http://localhost:8080"
 
-    logger := logrus.New()
-    logger.SetLevel(logrus.InfoLevel)
+	logger := logrus.New()
+	logger.SetLevel(logrus.InfoLevel)
 
-    h := NewRouter(svc, baseURL, logger, nil)
+	h := NewRouter(svc, baseURL, logger, nil, nil)
 
-    body := `{"url":"https://practicum.yandex.ru"}`
-    req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/shorten", strings.NewReader(body))
-    req.Header.Set("Content-Type", "application/json")
+	body := `{"url":"https://practicum.yandex.ru"}`
+	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/shorten", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 
-    w := httptest.NewRecorder()
-    h.ServeHTTP(w, req)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
 
-    res := w.Result()
-    defer res.Body.Close()
+	res := w.Result()
+	defer res.Body.Close()
 
-    if res.StatusCode != http.StatusCreated {
-        t.Fatalf("expected %d, got %d", http.StatusCreated, res.StatusCode)
-    }
+	if res.StatusCode != http.StatusCreated {
+		t.Fatalf("expected %d, got %d", http.StatusCreated, res.StatusCode)
+	}
 
-    ct := res.Header.Get("Content-Type")
-    if !strings.HasPrefix(strings.ToLower(ct), "application/json") {
-        t.Fatalf("expected application/json, got %q", ct)
-    }
+	ct := res.Header.Get("Content-Type")
+	if !strings.HasPrefix(strings.ToLower(ct), "application/json") {
+		t.Fatalf("expected application/json, got %q", ct)
+	}
 
-    b, err := io.ReadAll(res.Body)
-    if err != nil {
-        t.Fatalf("read body: %v", err)
-    }
+	b, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
 
-    var out struct {
-        Result string `json:"result"`
-    }
-    if err := json.Unmarshal(b, &out); err != nil {
-        t.Fatalf("unmarshal: %v; body=%q", err, string(b))
-    }
+	var out struct {
+		Result string `json:"result"`
+	}
+	if err := json.Unmarshal(b, &out); err != nil {
+		t.Fatalf("unmarshal: %v; body=%q", err, string(b))
+	}
 
-    if !strings.HasPrefix(out.Result, baseURL+"/") {
-        t.Fatalf("expected result to start with %q, got %q", baseURL+"/", out.Result)
-    }
+	if !strings.HasPrefix(out.Result, baseURL+"/") {
+		t.Fatalf("expected result to start with %q, got %q", baseURL+"/", out.Result)
+	}
 }
 
 func TestAPIShorten_GzipResponse(t *testing.T) {
@@ -199,7 +199,7 @@ func TestAPIShorten_GzipResponse(t *testing.T) {
 	logger.SetLevel(logrus.InfoLevel)
 
 	baseURL := "http://localhost:8080"
-	h := NewRouter(svc, baseURL, logger, nil)
+	h := NewRouter(svc, baseURL, logger, nil, nil)
 
 	body := `{"url":"https://practicum.yandex.ru"}`
 	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/shorten", strings.NewReader(body))
@@ -249,7 +249,7 @@ func TestAPIShorten_GzipRequest(t *testing.T) {
 	logger.SetLevel(logrus.InfoLevel)
 
 	baseURL := "http://localhost:8080"
-	h := NewRouter(svc, baseURL, logger, nil)
+	h := NewRouter(svc, baseURL, logger, nil, nil)
 
 	var buf bytes.Buffer
 	gw := gzip.NewWriter(&buf)
@@ -279,7 +279,7 @@ func TestPOST_APIShortenBatch_ReturnsJSON(t *testing.T) {
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)
 
-	h := NewRouter(svc, baseURL, logger, nil)
+	h := NewRouter(svc, baseURL, logger, nil, nil)
 
 	body := `[{"correlation_id":"a1","original_url":"https://example.com/1"},{"correlation_id":"b2","original_url":"https://example.com/2"}]`
 	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/shorten/batch", strings.NewReader(body))

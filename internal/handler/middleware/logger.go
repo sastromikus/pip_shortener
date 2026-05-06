@@ -7,6 +7,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// LogResponseWriter wraps http.ResponseWriter and captures response status and size.
 type LogResponseWriter struct {
 	http.ResponseWriter
 	status int
@@ -24,7 +25,13 @@ func (w *LogResponseWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
+// Logger logs request method, URI, duration, status code and response size.
+// If logger is nil, middleware acts as a no-op.
 func Logger(logger *logrus.Logger) func(http.Handler) http.Handler {
+	if logger == nil {
+		return func(next http.Handler) http.Handler { return next }
+	}
+
 	logger.SetLevel(logrus.InfoLevel)
 
 	return func(next http.Handler) http.Handler {
@@ -38,13 +45,10 @@ func Logger(logger *logrus.Logger) func(http.Handler) http.Handler {
 				lw.status = http.StatusOK
 			}
 
-			logger.WithFields(logrus.Fields{
-				"method":   r.Method,
-				"uri":      r.RequestURI,
-				"duration": time.Since(start).String(),
-				"status":   lw.status,
-				"size":     lw.size,
-			}).Info("request")
+			logger.Infof(
+				"request method=%s uri=%s duration=%s status=%d size=%d",
+				r.Method, r.RequestURI, time.Since(start).String(), lw.status, lw.size,
+			)
 		})
 	}
 }
