@@ -24,6 +24,31 @@ import (
 	_ "github.com/lib/pq"
 )
 
+var buildVersion string
+var buildDate string
+var buildCommit string
+
+func printBuildInfo() {
+	v := buildVersion
+	if v == "" {
+		v = "N/A"
+	}
+
+	d := buildDate
+	if d == "" {
+		d = "N/A"
+	}
+
+	c := buildCommit
+	if c == "" {
+		c = "N/A"
+	}
+
+	fmt.Printf("Build version: %s\n", v)
+	fmt.Printf("Build date: %s\n", d)
+	fmt.Printf("Build commit: %s\n", c)
+}
+
 func migrationPaths() ([]string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -80,6 +105,8 @@ func runMigrations(db *sql.DB) error {
 }
 
 func main() {
+	printBuildInfo()
+	
 	var repo repository.URLRepository
 	var db *sql.DB
 	var observers []audit.Observer
