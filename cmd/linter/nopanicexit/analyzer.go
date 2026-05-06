@@ -19,12 +19,12 @@ func run(pass *analysis.Pass) (any, error) {
 	var currentFunc *ast.FuncDecl
 
 	if pass.Pkg == nil {
-	    return nil, nil
+		return nil, nil
 	}
 
 	p := pass.Pkg.Path()
 	if !strings.HasPrefix(p, "github.com/sastromikus/pip_shortener") {
-	    return nil, nil
+		return nil, nil
 	}
 
 	ast.Inspect(pass.Files[0], func(n ast.Node) bool {
@@ -52,7 +52,7 @@ func checkCall(pass *analysis.Pass, fn *ast.FuncDecl, call *ast.CallExpr) {
 	if id, ok := call.Fun.(*ast.Ident); ok && id.Name == "panic" {
 		pos := pass.Fset.Position(call.Lparen)
 		if !strings.Contains(pos.Filename, "pip_shortener") {
-		    return
+			return
 		}
 
 		pass.Reportf(call.Lparen, "panic usage is forbidden")
@@ -67,7 +67,7 @@ func checkCall(pass *analysis.Pass, fn *ast.FuncDecl, call *ast.CallExpr) {
 		if !allowedInMainMain(pass, fn) {
 			pos := pass.Fset.Position(call.Lparen)
 			if !strings.Contains(pos.Filename, "pip_shortener") {
-			    return
+				return
 			}
 
 			pass.Reportf(call.Lparen, "log.Fatal is allowed only in main.main")
@@ -81,9 +81,9 @@ func checkCall(pass *analysis.Pass, fn *ast.FuncDecl, call *ast.CallExpr) {
 		if !allowedInMainMain(pass, fn) {
 			pos := pass.Fset.Position(call.Lparen)
 			if !strings.Contains(pos.Filename, "pip_shortener") {
-			    return
+				return
 			}
-			
+
 			pass.Reportf(call.Lparen, "os.Exit is allowed only in main.main")
 		}
 		return

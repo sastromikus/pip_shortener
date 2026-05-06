@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -10,8 +12,6 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
-	"fmt"
-	"errors"
 
 	"github.com/sastromikus/pip_shortener/internal/audit"
 	"github.com/sastromikus/pip_shortener/internal/config"
