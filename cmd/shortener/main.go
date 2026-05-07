@@ -12,12 +12,17 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+	"net"
 
 	"github.com/sastromikus/pip_shortener/internal/audit"
 	"github.com/sastromikus/pip_shortener/internal/config"
 	"github.com/sastromikus/pip_shortener/internal/handler"
 	"github.com/sastromikus/pip_shortener/internal/repository"
 	"github.com/sastromikus/pip_shortener/internal/service"
+	"github.com/sastromikus/pip_shortener/api/grpc/shortenerv1"
+	"github.com/sastromikus/pip_shortener/internal/grpcserver"
+
+	"google.golang.org/grpc"
 
 	"github.com/sirupsen/logrus"
 
@@ -178,6 +183,20 @@ func main() {
 	svc.StartDeleteWorker(128, 500*time.Millisecond)
 	router := handler.NewRouter(svc, cfg.BaseURL, logger, db, auditor, cfg.TrustedSubnet)
 
+	grpcLis, err := net.Listen("tcp", cfg.GRPCAddr)
+	if err != nil {
+		log.Fatalf("grpc listen: %v", err)
+	}
+	grpcSrv := grpc.NewServer()
+	shortenerv1.RegisterShortenerServiceServer(grpcSrv, grpcserver.New(svc, cfg.BaseURL))
+
+	go func() {
+		log.Printf("grpc listening on %s\n", cfg.GRPCAddr)
+		if err := grpcSrv.Serve(grpcLis); err != nil {
+			log.Printf("grpc serve: %v", err)
+		}
+	}()
+
 	srv := &http.Server{
 		Addr:    cfg.ServerAddr,
 		Handler: router,
@@ -218,6 +237,9 @@ func main() {
 	if err != nil && err != http.ErrServerClosed {
 		log.Printf("server error after shutdown: %v", err)
 	}
+
+	grpcSrv.GracefulStop()
+	_ = grpcLis.Close()
 
 	if db != nil {
 		_ = db.Close()
