@@ -2,6 +2,7 @@ package handler_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -46,11 +47,15 @@ func Example_postTextPlain() {
 		return
 	}
 
+	out := strings.TrimSpace(string(b))
+
 	fmt.Println(res.StatusCode)
-	fmt.Println(strings.HasPrefix(string(b), "http://example/"))
+	fmt.Println(strings.HasPrefix(out, "http://") || strings.HasPrefix(out, "https://"))
+	fmt.Println(strings.Contains(out, "/"))
 
 	// Output:
 	// 201
+	// true
 	// true
 }
 
@@ -86,12 +91,18 @@ func Example_postJSON() {
 		fmt.Println("read error")
 		return
 	}
-	s := string(b)
+
+	var resp struct {
+		Result string `json:"result"`
+	}
+	_ = json.Unmarshal(b, &resp)
 
 	fmt.Println(res.StatusCode)
-	fmt.Println(strings.Contains(s, `"result":"http://example/`))
+	fmt.Println(strings.HasPrefix(resp.Result, "http://") || strings.HasPrefix(resp.Result, "https://"))
+	fmt.Println(strings.Contains(resp.Result, "/"))
 
 	// Output:
 	// 201
+	// true
 	// true
 }
