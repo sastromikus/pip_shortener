@@ -22,7 +22,7 @@ func Example_postTextPlain() {
 	logger.SetOutput(io.Discard)
 	logger.SetLevel(logrus.InfoLevel)
 
-	h := handler.NewRouter(svc, "http://example", logger, nil, nil)
+	h := handler.NewRouter(svc, "http://localhost:8080", logger, nil, nil, "")
 	ts := httptest.NewServer(h)
 	defer ts.Close()
 
@@ -62,7 +62,7 @@ func Example_postJSON() {
 	logger.SetOutput(io.Discard)
 	logger.SetLevel(logrus.InfoLevel)
 
-	h := handler.NewRouter(svc, "http://example", logger, nil, nil)
+	h := handler.NewRouter(svc, "http://localhost:8080", logger, nil, nil, "")
 	ts := httptest.NewServer(h)
 	defer ts.Close()
 

@@ -21,7 +21,7 @@ func TestPOST_Shorten_Returns201AndShortURL(t *testing.T) {
 	svc := service.NewShortener(repo)
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)
-	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil)
+	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil, "")
 
 	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/", strings.NewReader("https://practicum.yandex.ru/"))
 	req.Header.Set("Content-Type", "text/plain")
@@ -63,7 +63,7 @@ func TestGET_Redirect_Returns307AndLocation(t *testing.T) {
 	svc := service.NewShortener(repo)
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)
-	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil)
+	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil, "")
 
 	const id = "TESTID12"
 	const original = "https://example.com/path"
@@ -89,7 +89,7 @@ func TestInvalidRequests_Return400(t *testing.T) {
 	svc := service.NewShortener(repo)
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)
-	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil)
+	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil, "")
 
 	tests := []struct {
 		name string
@@ -153,7 +153,7 @@ func TestPOST_APIShorten_ReturnsJSON(t *testing.T) {
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)
 
-	h := NewRouter(svc, baseURL, logger, nil, nil)
+	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil, "")
 
 	body := `{"url":"https://practicum.yandex.ru"}`
 	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/shorten", strings.NewReader(body))
@@ -199,7 +199,7 @@ func TestAPIShorten_GzipResponse(t *testing.T) {
 	logger.SetLevel(logrus.InfoLevel)
 
 	baseURL := "http://localhost:8080"
-	h := NewRouter(svc, baseURL, logger, nil, nil)
+	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil, "")
 
 	body := `{"url":"https://practicum.yandex.ru"}`
 	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/shorten", strings.NewReader(body))
@@ -249,7 +249,7 @@ func TestAPIShorten_GzipRequest(t *testing.T) {
 	logger.SetLevel(logrus.InfoLevel)
 
 	baseURL := "http://localhost:8080"
-	h := NewRouter(svc, baseURL, logger, nil, nil)
+	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil, "")
 
 	var buf bytes.Buffer
 	gw := gzip.NewWriter(&buf)
@@ -279,7 +279,7 @@ func TestPOST_APIShortenBatch_ReturnsJSON(t *testing.T) {
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)
 
-	h := NewRouter(svc, baseURL, logger, nil, nil)
+	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil, "")
 
 	body := `[{"correlation_id":"a1","original_url":"https://example.com/1"},{"correlation_id":"b2","original_url":"https://example.com/2"}]`
 	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/shorten/batch", strings.NewReader(body))

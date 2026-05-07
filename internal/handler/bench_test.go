@@ -25,7 +25,7 @@ func BenchmarkPOST_Shorten_TextPlain(b *testing.B) {
 	logger.SetLevel(logrus.InfoLevel)
 	logger.SetOutput(io.Discard)
 
-	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil)
+	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil, "")
 
 	u := mustURL("http://localhost:8080/")
 	body := []byte("http://example.com/path")
@@ -56,7 +56,7 @@ func BenchmarkPOST_API_Shorten_JSON(b *testing.B) {
 	logger.SetLevel(logrus.InfoLevel)
 	logger.SetOutput(io.Discard)
 
-	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil)
+	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil, "")
 
 	u := mustURL("http://localhost:8080/api/shorten")
 	payload := []byte(`{"url":"https://practicum.yandex.ru/"}`)
@@ -88,7 +88,7 @@ func BenchmarkGET_Follow(b *testing.B) {
 	logger.SetOutput(io.Discard)
 
 	repo.Put("TESTID12", "https://example.com/path")
-	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil)
+	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil, "")
 
 	u := mustURL("http://localhost:8080/TESTID12")
 	cookie := validUserCookie("bench")
