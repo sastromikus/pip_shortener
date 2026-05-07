@@ -27,10 +27,10 @@ const (
 	defaultFileStoragePath = "storage.json"
 	envFileStoragePath     = "FILE_STORAGE_PATH"
 
-	envDatabaseDSN    = "DATABASE_DSN"
-	envEnableHTTPS    = "ENABLE_HTTPS"
-	envAuditFile      = "AUDIT_FILE"
-	envAuditURL       = "AUDIT_URL"
+	envDatabaseDSN = "DATABASE_DSN"
+	envEnableHTTPS = "ENABLE_HTTPS"
+	envAuditFile   = "AUDIT_FILE"
+	envAuditURL    = "AUDIT_URL"
 )
 
 // Parse reads flags and environment variables and returns the resulting configuration.
