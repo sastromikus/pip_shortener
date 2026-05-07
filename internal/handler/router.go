@@ -20,7 +20,7 @@ const maxPOSTBody = 8 << 10
 // NewRouter builds an HTTP router with all service endpoints.
 // baseURL is used as a prefix for generated short links.
 // auditor may be nil to disable audit events.
-func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger, db *sql.DB, auditor *audit.Notifier) http.Handler {
+func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger, db *sql.DB, auditor *audit.Notifier, trustedSubnet string) http.Handler {
 	baseURL = strings.TrimRight(baseURL, "/")
 
 	r := chi.NewRouter()
@@ -58,6 +58,10 @@ func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger, db
 	r.Get("/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 		handleRedirect(svc, id, w, r, auditor)
+	})
+
+	r.Get("/api/internal/stats", func(w http.ResponseWriter, r *http.Request) {
+		handleInternalStats(svc, trustedSubnet, w, r)
 	})
 
 	return r
