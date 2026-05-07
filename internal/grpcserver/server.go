@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/sastromikus/pip_shortener/api/grpc/shortenerv1"
+	shortenerv1 "github.com/sastromikus/pip_shortener/api/grpc"
 	"github.com/sastromikus/pip_shortener/internal/service"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

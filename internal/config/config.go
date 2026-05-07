@@ -16,7 +16,7 @@ type Config struct {
 	AuditFile       string
 	AuditURL        string
 	TrustedSubnet   string
-	GRPCAddr 		string
+	GRPCAddr        string
 	EnableHTTPS     bool
 }
 
@@ -52,7 +52,7 @@ type fileConfig struct {
 	AuditFile       string `json:"audit_file"`
 	AuditURL        string `json:"audit_url"`
 	TrustedSubnet   string `json:"trusted_subnet"`
-	GRPCAddr 		string `json:"grpc_address"`
+	GRPCAddr        string `json:"grpc_address"`
 }
 
 // Parse reads flags, config file and environment variables and returns the resulting configuration.
@@ -62,7 +62,7 @@ func Parse() Config {
 		ServerAddr:      defaultServerAddr,
 		BaseURL:         defaultBaseURL,
 		FileStoragePath: defaultFileStoragePath,
-		GRPCAddr: 		 defaultGRPCAddr,
+		GRPCAddr:        defaultGRPCAddr,
 	}
 
 	var flagAddr string
@@ -140,7 +140,7 @@ func Parse() Config {
 		cfg.TrustedSubnet = flagSubnet
 	}
 	if flagGRPC != "" {
-	    cfg.GRPCAddr = flagGRPC
+		cfg.GRPCAddr = flagGRPC
 	}
 
 	configPath := flagConfig
@@ -174,7 +174,7 @@ func Parse() Config {
 			cfg.TrustedSubnet = fc.TrustedSubnet
 		}
 		if !flagsSet.grpcSet && cfg.GRPCAddr == defaultGRPCAddr && fc.GRPCAddr != "" {
-		    cfg.GRPCAddr = fc.GRPCAddr
+			cfg.GRPCAddr = fc.GRPCAddr
 		}
 	}
 
@@ -203,7 +203,7 @@ func Parse() Config {
 		cfg.TrustedSubnet = v
 	}
 	if v := os.Getenv(envGRPCAddr); v != "" {
-	    cfg.GRPCAddr = v
+		cfg.GRPCAddr = v
 	}
 
 	return cfg

@@ -6,21 +6,21 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
 	"time"
-	"net"
 
+	shortenerv1 "github.com/sastromikus/pip_shortener/api/grpc"
 	"github.com/sastromikus/pip_shortener/internal/audit"
 	"github.com/sastromikus/pip_shortener/internal/config"
+	"github.com/sastromikus/pip_shortener/internal/grpcserver"
 	"github.com/sastromikus/pip_shortener/internal/handler"
 	"github.com/sastromikus/pip_shortener/internal/repository"
 	"github.com/sastromikus/pip_shortener/internal/service"
-	"github.com/sastromikus/pip_shortener/api/grpc/shortenerv1"
-	"github.com/sastromikus/pip_shortener/internal/grpcserver"
 
 	"google.golang.org/grpc"
 
@@ -233,7 +233,7 @@ func main() {
 
 	_ = srv.Shutdown(ctx)
 
-	err := <-srvErr
+	err = <-srvErr
 	if err != nil && err != http.ErrServerClosed {
 		log.Printf("server error after shutdown: %v", err)
 	}
