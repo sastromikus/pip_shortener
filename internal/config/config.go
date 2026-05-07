@@ -15,7 +15,7 @@ type Config struct {
 	DatabaseDSN     string
 	AuditFile       string
 	AuditURL        string
-	TrustedSubnet 	string
+	TrustedSubnet   string
 	EnableHTTPS     bool
 }
 
@@ -47,7 +47,7 @@ type fileConfig struct {
 	EnableHTTPS     *bool  `json:"enable_https"`
 	AuditFile       string `json:"audit_file"`
 	AuditURL        string `json:"audit_url"`
-	TrustedSubnet 	string `json:"trusted_subnet"`
+	TrustedSubnet   string `json:"trusted_subnet"`
 }
 
 // Parse reads flags, config file and environment variables and returns the resulting configuration.
@@ -127,7 +127,7 @@ func Parse() Config {
 		cfg.EnableHTTPS = true
 	}
 	if flagSubnet != "" {
-	    cfg.TrustedSubnet = flagSubnet
+		cfg.TrustedSubnet = flagSubnet
 	}
 
 	configPath := flagConfig
@@ -158,7 +158,7 @@ func Parse() Config {
 			cfg.AuditURL = fc.AuditURL
 		}
 		if !flagsSet.subnetSet && cfg.TrustedSubnet == "" && fc.TrustedSubnet != "" {
-		    cfg.TrustedSubnet = fc.TrustedSubnet
+			cfg.TrustedSubnet = fc.TrustedSubnet
 		}
 	}
 
@@ -184,7 +184,7 @@ func Parse() Config {
 		cfg.EnableHTTPS = parseEnvBool(v)
 	}
 	if v := os.Getenv(envTrustedSubnet); v != "" {
-	    cfg.TrustedSubnet = v
+		cfg.TrustedSubnet = v
 	}
 
 	return cfg

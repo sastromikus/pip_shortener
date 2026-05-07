@@ -287,7 +287,7 @@ func (s *Shortener) Stats() (urls int, users int, err error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	
+
 	us, err := st.CountUsers()
 	if err != nil {
 		return 0, 0, err
