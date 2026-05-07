@@ -54,18 +54,40 @@ func migrationPaths() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	cwdMigrations := filepath.Join(cwd, "migrations")
+
+	candidates := make([]string, 0, 3)
+
+	candidates = append(candidates, filepath.Join(cwd, "migrations"))
 
 	exe, err := os.Executable()
-	if err != nil {
-		return []string{cwdMigrations}, nil
+	if err == nil {
+		exeDir := filepath.Dir(exe)
+		candidates = append(candidates,
+			filepath.Join(exeDir, "migrations"),
+			filepath.Clean(filepath.Join(exeDir, "..", "..", "migrations")),
+		)
 	}
-	exeDir := filepath.Dir(exe)
 
-	exeMigrations1 := filepath.Join(exeDir, "migrations")
-	exeMigrations2 := filepath.Clean(filepath.Join(exeDir, "..", "..", "migrations"))
+	out := make([]string, 0, len(candidates))
+	seen := make(map[string]struct{})
+	for _, d := range candidates {
+		if _, ok := seen[d]; ok {
+			continue
+		}
+		seen[d] = struct{}{}
 
-	return []string{cwdMigrations, exeMigrations1, exeMigrations2}, nil
+		st, err := os.Stat(d)
+		if err != nil || !st.IsDir() {
+			continue
+		}
+		out = append(out, d)
+	}
+
+	if len(out) == 0 {
+		return nil, fmt.Errorf("migrations directory not found (tried: %v)", candidates)
+	}
+
+	return out, nil
 }
 
 func runMigrations(db *sql.DB) error {
@@ -161,24 +183,45 @@ func main() {
 		Handler: router,
 	}
 
+	srvErr := make(chan error, 1)
 	go func() {
-		log.Printf("listening on http://%s\n", cfg.ServerAddr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("error: %v", err)
+		var err error
+		if cfg.EnableHTTPS {
+			const certFile = "server.crt"
+			const keyFile = "server.key"
+			log.Printf("listening (https) on https://%s\n", cfg.ServerAddr)
+			err = srv.ListenAndServeTLS(certFile, keyFile)
+		} else {
+			log.Printf("listening on http://%s\n", cfg.ServerAddr)
+			err = srv.ListenAndServe()
 		}
+		srvErr <- err
 	}()
 
 	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	select {
+	case sig := <-stop:
+		log.Printf("shutdown signal: %v\n", sig)
+	case err := <-srvErr:
+		if err != nil && err != http.ErrServerClosed {
+			log.Fatalf("server error: %v", err)
+		}
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	_ = srv.Shutdown(ctx)
+
+	err := <-srvErr
+	if err != nil && err != http.ErrServerClosed {
+		log.Printf("server error after shutdown: %v", err)
+	}
 
 	if db != nil {
 		_ = db.Close()
 	}
 
-	_ = srv.Shutdown(ctx)
 	log.Println("shutdown")
 }
