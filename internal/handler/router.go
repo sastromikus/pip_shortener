@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -13,6 +14,14 @@ import (
 
 const maxPOSTBody = 8 << 10 
 
+type shortenJSONRequest struct {
+	URL string `json:"url"`
+}
+
+type shortenJSONResponse struct {
+	Result string `json:"result"`
+}
+
 func NewRouter(svc *service.Shortener, baseURL string) http.Handler {
 	baseURL = strings.TrimRight(baseURL, "/")
 
@@ -23,6 +32,10 @@ func NewRouter(svc *service.Shortener, baseURL string) http.Handler {
 
 	r.Post("/", func(w http.ResponseWriter, r *http.Request) {
 		handleShorten(svc, baseURL, w, r)
+	})
+
+	r.Post("/api/shorten", func(w http.ResponseWriter, r *http.Request) {
+		handleShortenJSON(svc, baseURL, w, r)
 	})
 
 	r.Get("/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -63,6 +76,34 @@ func handleShorten(svc *service.Shortener, baseURL string, w http.ResponseWriter
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
 	_, _ = w.Write([]byte(shortURL))
+}
+
+func handleShortenJSON(svc *service.Shortener, baseURL string, w http.ResponseWriter, r *http.Request) {
+	var req shortenJSONRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		badRequest(w)
+		return
+	}
+
+	raw := strings.TrimSpace(req.URL)
+	if raw == "" {
+		badRequest(w)
+		return
+	}
+
+	id, err := svc.Shorten(raw)
+	if err != nil {
+		badRequest(w)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+
+	_ = json.NewEncoder(w).Encode(shortenJSONResponse{
+		Result: baseURL + "/" + id,
+	})
 }
 
 func handleRedirect(svc *service.Shortener, id string, w http.ResponseWriter, r *http.Request) {
