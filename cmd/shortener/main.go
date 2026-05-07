@@ -54,18 +54,40 @@ func migrationPaths() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	cwdMigrations := filepath.Join(cwd, "migrations")
+
+	candidates := make([]string, 0, 3)
+
+	candidates = append(candidates, filepath.Join(cwd, "migrations"))
 
 	exe, err := os.Executable()
-	if err != nil {
-		return []string{cwdMigrations}, nil
+	if err == nil {
+		exeDir := filepath.Dir(exe)
+		candidates = append(candidates,
+			filepath.Join(exeDir, "migrations"),
+			filepath.Clean(filepath.Join(exeDir, "..", "..", "migrations")),
+		)
 	}
-	exeDir := filepath.Dir(exe)
 
-	exeMigrations1 := filepath.Join(exeDir, "migrations")
-	exeMigrations2 := filepath.Clean(filepath.Join(exeDir, "..", "..", "migrations"))
+	out := make([]string, 0, len(candidates))
+	seen := make(map[string]struct{})
+	for _, d := range candidates {
+		if _, ok := seen[d]; ok {
+			continue
+		}
+		seen[d] = struct{}{}
 
-	return []string{cwdMigrations, exeMigrations1, exeMigrations2}, nil
+		st, err := os.Stat(d)
+		if err != nil || !st.IsDir() {
+			continue
+		}
+		out = append(out, d)
+	}
+
+	if len(out) == 0 {
+		return nil, fmt.Errorf("migrations directory not found (tried: %v)", candidates)
+	}
+
+	return out, nil
 }
 
 func runMigrations(db *sql.DB) error {
@@ -162,6 +184,17 @@ func main() {
 	}
 
 	go func() {
+		if cfg.EnableHTTPS {
+			const certFile = "server.crt"
+			const keyFile = "server.key"
+
+			log.Printf("listening (https) on https://%s\n", cfg.ServerAddr)
+			if err := srv.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("error: %v", err)
+			}
+			return
+		}
+
 		log.Printf("listening on http://%s\n", cfg.ServerAddr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("error: %v", err)
