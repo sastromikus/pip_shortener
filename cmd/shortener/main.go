@@ -183,35 +183,45 @@ func main() {
 		Handler: router,
 	}
 
+	srvErr := make(chan error, 1)
 	go func() {
+		var err error
 		if cfg.EnableHTTPS {
 			const certFile = "server.crt"
 			const keyFile = "server.key"
-
 			log.Printf("listening (https) on https://%s\n", cfg.ServerAddr)
-			if err := srv.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
-				log.Fatalf("error: %v", err)
-			}
-			return
+			err = srv.ListenAndServeTLS(certFile, keyFile)
+		} else {
+			log.Printf("listening on http://%s\n", cfg.ServerAddr)
+			err = srv.ListenAndServe()
 		}
-
-		log.Printf("listening on http://%s\n", cfg.ServerAddr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("error: %v", err)
-		}
+		srvErr <- err
 	}()
 
 	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	select {
+	case sig := <-stop:
+		log.Printf("shutdown signal: %v\n", sig)
+	case err := <-srvErr:
+		if err != nil && err != http.ErrServerClosed {
+			log.Fatalf("server error: %v", err)
+		}
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
+	_ = srv.Shutdown(ctx)
+
+	err := <-srvErr
+	if err != nil && err != http.ErrServerClosed {
+		log.Printf("server error after shutdown: %v", err)
+	}
 
 	if db != nil {
 		_ = db.Close()
 	}
 
-	_ = srv.Shutdown(ctx)
 	log.Println("shutdown")
 }
