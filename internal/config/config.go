@@ -3,6 +3,7 @@ package config
 import (
 	"flag"
 	"os"
+	"strings"
 )
 
 // Config holds application configuration derived from flags and environment variables.
@@ -13,6 +14,7 @@ type Config struct {
 	DatabaseDSN     string
 	AuditFile       string
 	AuditURL        string
+	EnableHTTPS     bool
 }
 
 const (
@@ -25,7 +27,10 @@ const (
 	defaultFileStoragePath = "storage.json"
 	envFileStoragePath     = "FILE_STORAGE_PATH"
 
-	envDatabaseDSN = "DATABASE_DSN"
+	envDatabaseDSN    = "DATABASE_DSN"
+	envEnableHTTPS    = "ENABLE_HTTPS"
+	envAuditFile      = "AUDIT_FILE"
+	envAuditURL       = "AUDIT_URL"
 )
 
 // Parse reads flags and environment variables and returns the resulting configuration.
@@ -42,6 +47,7 @@ func Parse() Config {
 	var flagDSN string
 	var flagAuditFile string
 	var flagAuditURL string
+	var flagHTTPS bool
 
 	flag.StringVar(&flagFile, "f", "", "File storage path")
 	flag.StringVar(&flagAddr, "a", "", "HTTP server address")
@@ -51,6 +57,7 @@ func Parse() Config {
 	flag.StringVar(&flagDSN, "database_dsn", "", "Database DSN")
 	flag.StringVar(&flagAuditFile, "audit-file", "", "Audit log file path")
 	flag.StringVar(&flagAuditURL, "audit-url", "", "Audit receiver URL")
+	flag.BoolVar(&flagHTTPS, "s", false, "Enable HTTPS")
 	flag.Parse()
 
 	if flagAddr != "" {
@@ -71,8 +78,12 @@ func Parse() Config {
 	if flagAuditURL != "" {
 		cfg.AuditURL = flagAuditURL
 	}
+	if flagHTTPS {
+		cfg.EnableHTTPS = true
+	}
 
-	if v := os.Getenv("DATABASE_DSN"); v != "" {
+	// env overrides flags
+	if v := os.Getenv(envDatabaseDSN); v != "" {
 		cfg.DatabaseDSN = v
 	}
 	if v := os.Getenv(envServerAddr); v != "" {
@@ -84,15 +95,28 @@ func Parse() Config {
 	if v := os.Getenv(envFileStoragePath); v != "" {
 		cfg.FileStoragePath = v
 	}
-	if v := os.Getenv(envDatabaseDSN); v != "" {
-		cfg.DatabaseDSN = v
-	}
-	if v := os.Getenv("AUDIT_FILE"); v != "" {
+	if v := os.Getenv(envAuditFile); v != "" {
 		cfg.AuditFile = v
 	}
-	if v := os.Getenv("AUDIT_URL"); v != "" {
+	if v := os.Getenv(envAuditURL); v != "" {
 		cfg.AuditURL = v
+	}
+	if v := os.Getenv(envEnableHTTPS); v != "" {
+		cfg.EnableHTTPS = parseEnvBool(v)
 	}
 
 	return cfg
+}
+
+func parseEnvBool(v string) bool {
+	s := strings.TrimSpace(strings.ToLower(v))
+	switch s {
+	case "1", "true", "yes", "y", "on":
+		return true
+	case "0", "false", "no", "n", "off":
+		return false
+	default:
+		// любое непустое значение считаем включением
+		return true
+	}
 }
