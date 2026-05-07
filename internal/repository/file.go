@@ -267,3 +267,15 @@ func (r *FileRepository) ListUserURLs(userID string) ([]UserURL, error) {
 
 	return out, nil
 }
+
+func (r *FileRepository) CountURLs() (int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.data), nil
+}
+
+func (r *FileRepository) CountUsers() (int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.user), nil
+}

@@ -80,3 +80,18 @@ func (r *MemoryRepository) ListUserURLs(userID string) ([]UserURL, error) {
 
 	return out, nil
 }
+
+func (r *MemoryRepository) CountURLs() (int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.data), nil
+}
+
+func (r *MemoryRepository) CountUsers() (int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.user == nil {
+		return 0, nil
+	}
+	return len(r.user), nil
+}

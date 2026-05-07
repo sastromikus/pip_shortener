@@ -170,3 +170,17 @@ func (r *PostgresRepository) MarkDeleted(userID string, ids []string) error {
 
 	return err
 }
+
+func (r *PostgresRepository) CountURLs() (int, error) {
+	var n int
+	err := r.db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM urls`).Scan(&n)
+	return n, err
+}
+
+func (r *PostgresRepository) CountUsers() (int, error) {
+	var n int
+	err := r.db.QueryRowContext(context.Background(),
+		`SELECT COUNT(DISTINCT user_id) FROM user_urls`,
+	).Scan(&n)
+	return n, err
+}

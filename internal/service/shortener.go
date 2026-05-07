@@ -273,3 +273,25 @@ func (s *Shortener) ResolveWithDeleted(id string) (string, bool, bool) {
 
 	return original, ok, false
 }
+
+func (s *Shortener) Stats() (urls int, users int, err error) {
+	st, ok := s.repo.(interface {
+		CountURLs() (int, error)
+		CountUsers() (int, error)
+	})
+	if !ok {
+		return 0, 0, nil
+	}
+
+	u, err := st.CountURLs()
+	if err != nil {
+		return 0, 0, err
+	}
+	
+	us, err := st.CountUsers()
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return u, us, nil
+}
