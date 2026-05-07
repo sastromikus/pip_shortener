@@ -15,6 +15,7 @@ type Config struct {
 	DatabaseDSN     string
 	AuditFile       string
 	AuditURL        string
+	TrustedSubnet 	string
 	EnableHTTPS     bool
 }
 
@@ -34,6 +35,8 @@ const (
 	envAuditURL    = "AUDIT_URL"
 
 	envConfigPath = "CONFIG"
+
+	envTrustedSubnet = "TRUSTED_SUBNET"
 )
 
 type fileConfig struct {
@@ -44,6 +47,7 @@ type fileConfig struct {
 	EnableHTTPS     *bool  `json:"enable_https"`
 	AuditFile       string `json:"audit_file"`
 	AuditURL        string `json:"audit_url"`
+	TrustedSubnet 	string `json:"trusted_subnet"`
 }
 
 // Parse reads flags, config file and environment variables and returns the resulting configuration.
@@ -63,6 +67,7 @@ func Parse() Config {
 	var flagAuditURL string
 	var flagHTTPS bool
 	var flagConfig string
+	var flagSubnet string
 
 	flag.StringVar(&flagFile, "f", "", "File storage path")
 	flag.StringVar(&flagAddr, "a", "", "HTTP server address")
@@ -73,6 +78,7 @@ func Parse() Config {
 	flag.StringVar(&flagAuditFile, "audit-file", "", "Audit log file path")
 	flag.StringVar(&flagAuditURL, "audit-url", "", "Audit receiver URL")
 	flag.BoolVar(&flagHTTPS, "s", false, "Enable HTTPS")
+	flag.StringVar(&flagSubnet, "t", "", "Trusted subnet CIDR (CIDR) for internal stats")
 
 	flag.StringVar(&flagConfig, "c", "", "Config file path (JSON)")
 	flag.StringVar(&flagConfig, "config", "", "Config file path (JSON)")
@@ -87,6 +93,7 @@ func Parse() Config {
 		httpsSet  bool
 		auditFSet bool
 		auditUSet bool
+		subnetSet bool
 	}{
 		addrSet:   flagAddr != "",
 		baseSet:   flagBase != "",
@@ -95,6 +102,7 @@ func Parse() Config {
 		httpsSet:  flagHTTPS,
 		auditFSet: flagAuditFile != "",
 		auditUSet: flagAuditURL != "",
+		subnetSet: flagSubnet != "",
 	}
 
 	if flagAddr != "" {
@@ -117,6 +125,9 @@ func Parse() Config {
 	}
 	if flagHTTPS {
 		cfg.EnableHTTPS = true
+	}
+	if flagSubnet != "" {
+	    cfg.TrustedSubnet = flagSubnet
 	}
 
 	configPath := flagConfig
@@ -146,6 +157,9 @@ func Parse() Config {
 		if !flagsSet.auditUSet && cfg.AuditURL == "" && fc.AuditURL != "" {
 			cfg.AuditURL = fc.AuditURL
 		}
+		if !flagsSet.subnetSet && cfg.TrustedSubnet == "" && fc.TrustedSubnet != "" {
+		    cfg.TrustedSubnet = fc.TrustedSubnet
+		}
 	}
 
 	if v := os.Getenv(envDatabaseDSN); v != "" {
@@ -168,6 +182,9 @@ func Parse() Config {
 	}
 	if v := os.Getenv(envEnableHTTPS); v != "" {
 		cfg.EnableHTTPS = parseEnvBool(v)
+	}
+	if v := os.Getenv(envTrustedSubnet); v != "" {
+	    cfg.TrustedSubnet = v
 	}
 
 	return cfg
