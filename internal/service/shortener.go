@@ -5,10 +5,11 @@ import (
 	"errors"
 	"net/url"
 	"strings"
+	"sync"
 )
 
 const (
-	idLen  = 8
+	idLen      = 8
 	stringbase = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 )
 
@@ -20,10 +21,21 @@ type URLRepository interface {
 
 type Shortener struct {
 	repo URLRepository
+
+	mu       sync.RWMutex
+	userURLs map[string][]UserURL
+}
+
+type UserURL struct {
+	ID          string
+	OriginalURL string
 }
 
 func NewShortener(repo URLRepository) *Shortener {
-	return &Shortener{repo: repo}
+	return &Shortener{
+		repo:     repo,
+		userURLs: make(map[string][]UserURL),
+	}
 }
 
 func (s *Shortener) Shorten(raw string) (string, error) {
@@ -47,6 +59,52 @@ func (s *Shortener) Shorten(raw string) (string, error) {
 
 	s.repo.Put(id, raw)
 	return id, nil
+}
+
+func (s *Shortener) ShortenForUser(raw string, userID string) (string, error) {
+	id, err := s.Shorten(raw)
+	if err != nil {
+		return "", err
+	}
+
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return id, nil
+	}
+
+	original, ok := s.Resolve(id)
+	if !ok {
+		return id, nil
+	}
+
+	s.mu.Lock()
+	s.userURLs[userID] = append(s.userURLs[userID], UserURL{
+		ID:          id,
+		OriginalURL: original,
+	})
+	s.mu.Unlock()
+
+	return id, nil
+}
+
+func (s *Shortener) UserURLs(userID string) []UserURL {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	items := s.userURLs[userID]
+	if len(items) == 0 {
+		return nil
+	}
+
+	out := make([]UserURL, len(items))
+	copy(out, items)
+
+	return out
 }
 
 func (s *Shortener) Resolve(id string) (string, bool) {

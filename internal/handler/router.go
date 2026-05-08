@@ -10,68 +10,74 @@ import (
 
 	"github.com/sastromikus/pip_shortener/internal/service"
 
-    "github.com/sirupsen/logrus"
-    "github.com/sastromikus/pip_shortener/internal/handler/middleware"
+	"github.com/sastromikus/pip_shortener/internal/handler/middleware"
+	"github.com/sirupsen/logrus"
 )
 
-const maxPOSTBody = 8 << 10 
+const maxPOSTBody = 8 << 10
 
 func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger) http.Handler {
-    baseURL = strings.TrimRight(baseURL, "/")
+	baseURL = strings.TrimRight(baseURL, "/")
 
-    r := chi.NewRouter()
-    r.Use(middleware.Gzip())
-    r.Use(middleware.Logger(logger))
+	r := chi.NewRouter()
+	r.Use(middleware.Gzip())
+	r.Use(middleware.Logger(logger))
 
-    r.NotFound(func(w http.ResponseWriter, r *http.Request) { badRequest(w) })
-    r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) { badRequest(w) })
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) { badRequest(w) })
+	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) { badRequest(w) })
 
-    r.Post("/", func(w http.ResponseWriter, r *http.Request) {
-        handleShorten(svc, baseURL, w, r)
-    })
+	r.Post("/", func(w http.ResponseWriter, r *http.Request) {
+		handleShorten(svc, baseURL, w, r)
+	})
 
-    r.Post("/api/shorten", func(w http.ResponseWriter, r *http.Request) {
-        handleAPIPostShortenJSON(svc, baseURL, w, r)
-    })
+	r.Post("/api/shorten", func(w http.ResponseWriter, r *http.Request) {
+		handleAPIPostShortenJSON(svc, baseURL, w, r)
+	})
 
-    r.Get("/{id}", func(w http.ResponseWriter, r *http.Request) {
-        id := chi.URLParam(r, "id")
-        handleRedirect(svc, id, w, r)
-    })
+	r.Get("/api/user/urls", func(w http.ResponseWriter, r *http.Request) {
+		handleUserURLs(svc, baseURL, w, r)
+	})
 
-    return r
+	r.Get("/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		handleRedirect(svc, id, w, r)
+	})
+
+	return r
 }
 
 func handleShorten(svc *service.Shortener, baseURL string, w http.ResponseWriter, r *http.Request) {
-    ct := r.Header.Get("Content-Type")
-    if ct == "" || !strings.HasPrefix(strings.ToLower(ct), "text/plain") {
-        badRequest(w)
-        return
-    }
+	ct := strings.ToLower(r.Header.Get("Content-Type"))
+	if ct != "" && !strings.HasPrefix(ct, "text/plain") && !strings.HasPrefix(ct, "application/x-gzip") {
+		badRequest(w)
+		return
+	}
 
-    body, err := readBody(r, maxPOSTBody)
-    if err != nil {
-        badRequest(w)
-        return
-    }
+	body, err := readBody(r, maxPOSTBody)
+	if err != nil {
+		badRequest(w)
+		return
+	}
 
-    raw := strings.TrimSpace(string(body))
-    if raw == "" {
-        badRequest(w)
-        return
-    }
+	raw := strings.TrimSpace(string(body))
+	if raw == "" {
+		badRequest(w)
+		return
+	}
 
-    id, err := svc.Shorten(raw)
-    if err != nil {
-        badRequest(w)
-        return
-    }
+	userID := getOrCreateUserID(w, r)
 
-    shortURL := baseURL + "/" + id
+	id, err := svc.ShortenForUser(raw, userID)
+	if err != nil {
+		badRequest(w)
+		return
+	}
 
-    w.Header().Set("Content-Type", "text/plain")
-    w.WriteHeader(http.StatusCreated)
-    _, _ = w.Write([]byte(shortURL))
+	shortURL := baseURL + "/" + id
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusCreated)
+	_, _ = w.Write([]byte(shortURL))
 }
 
 func handleRedirect(svc *service.Shortener, id string, w http.ResponseWriter, r *http.Request) {
