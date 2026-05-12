@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -12,7 +13,7 @@ import (
 	"github.com/sastromikus/pip_shortener/internal/service"
 )
 
-const maxPOSTBody = 8 << 10 
+const maxPOSTBody = 8 << 10
 
 type shortenJSONRequest struct {
 	URL string `json:"url"`
@@ -53,7 +54,7 @@ func handleShorten(svc *service.Shortener, baseURL string, w http.ResponseWriter
 		return
 	}
 
-	body, err := readBody(r, maxPOSTBody)
+	body, err := readBody(w, r, maxPOSTBody)
 	if err != nil {
 		badRequest(w)
 		return
@@ -67,11 +68,15 @@ func handleShorten(svc *service.Shortener, baseURL string, w http.ResponseWriter
 
 	id, err := svc.Shorten(raw)
 	if err != nil {
-		badRequest(w)
+		writeShortenError(w, err)
 		return
 	}
 
-	shortURL := baseURL + "/" + id
+	shortURL, err := buildShortURL(baseURL, id)
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
@@ -79,8 +84,9 @@ func handleShorten(svc *service.Shortener, baseURL string, w http.ResponseWriter
 }
 
 func handleShortenJSON(svc *service.Shortener, baseURL string, w http.ResponseWriter, r *http.Request) {
-	var req shortenJSONRequest
+	defer r.Body.Close()
 
+	var req shortenJSONRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		badRequest(w)
 		return
@@ -94,7 +100,13 @@ func handleShortenJSON(svc *service.Shortener, baseURL string, w http.ResponseWr
 
 	id, err := svc.Shorten(raw)
 	if err != nil {
-		badRequest(w)
+		writeShortenError(w, err)
+		return
+	}
+
+	shortURL, err := buildShortURL(baseURL, id)
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
@@ -102,7 +114,7 @@ func handleShortenJSON(svc *service.Shortener, baseURL string, w http.ResponseWr
 	w.WriteHeader(http.StatusCreated)
 
 	_ = json.NewEncoder(w).Encode(shortenJSONResponse{
-		Result: baseURL + "/" + id,
+		Result: shortURL,
 	})
 }
 
@@ -123,17 +135,25 @@ func handleRedirect(svc *service.Shortener, id string, w http.ResponseWriter, r 
 	w.WriteHeader(http.StatusTemporaryRedirect)
 }
 
-func readBody(r *http.Request, limit int64) ([]byte, error) {
+func readBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, error) {
 	defer r.Body.Close()
-	lr := &io.LimitedReader{R: r.Body, N: limit + 1}
-	b, err := io.ReadAll(lr)
-	if err != nil {
-		return nil, err
+
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+
+	return io.ReadAll(r.Body)
+}
+
+func buildShortURL(baseURL string, id string) (string, error) {
+	return url.JoinPath(baseURL, id)
+}
+
+func writeShortenError(w http.ResponseWriter, err error) {
+	if errors.Is(err, service.ErrGenerateID) {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
 	}
-	if int64(len(b)) > limit {
-		return nil, errors.New("body too large")
-	}
-	return b, nil
+
+	badRequest(w)
 }
 
 func badRequest(w http.ResponseWriter) {

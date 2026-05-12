@@ -16,30 +16,53 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
 	cfg := config.Parse()
+
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
 	router := handler.NewRouter(svc, cfg.BaseURL)
 
 	srv := &http.Server{
-	    Addr: cfg.ServerAddr,
-	    Handler: router,
+		Addr:    cfg.ServerAddr,
+		Handler: router,
 	}
+
+	serverErr := make(chan error, 1)
 
 	go func() {
 		log.Printf("listening on http://%s\n", cfg.ServerAddr)
+
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("error: %v", err)
+			serverErr <- err
+			return
 		}
+
+		serverErr <- nil
 	}()
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	select {
+	case <-ctx.Done():
+	case err := <-serverErr:
+		return err
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_ = srv.Shutdown(ctx)
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("server shutdown error: %v", err)
+		return err
+	}
+
 	log.Println("shutdown")
+	return nil
 }

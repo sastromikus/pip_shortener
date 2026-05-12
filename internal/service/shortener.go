@@ -3,18 +3,26 @@ package service
 import (
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"net/url"
+	"strings"
 )
 
 const (
-	idLen  = 8
+	idLen      = 8
 	stringbase = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+)
+
+var (
+	ErrEmptyURL          = errors.New("empty url")
+	ErrUnsupportedScheme = errors.New("unsupported scheme")
+	ErrEmptyHost         = errors.New("empty host")
+	ErrGenerateID        = errors.New("could not generate unique id")
 )
 
 type URLRepository interface {
 	Get(id string) (string, bool)
-	Put(id string, original string)
-	Exists(id string) bool
+	PutIfAbsent(id string, original string) bool
 }
 
 type Shortener struct {
@@ -26,16 +34,24 @@ func NewShortener(repo URLRepository) *Shortener {
 }
 
 func (s *Shortener) Shorten(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", ErrEmptyURL
+	}
+
+	if !strings.Contains(raw, "://") {
+		raw = "http://" + raw
+	}
+
 	if err := validateURL(raw); err != nil {
 		return "", err
 	}
 
-	id, err := s.generateUniqueID(idLen, 10)
+	id, err := s.shortenWithUniqueID(raw, idLen, 10)
 	if err != nil {
 		return "", err
 	}
 
-	s.repo.Put(id, raw)
 	return id, nil
 }
 
@@ -43,31 +59,36 @@ func (s *Shortener) Resolve(id string) (string, bool) {
 	return s.repo.Get(id)
 }
 
-func (s *Shortener) generateUniqueID(length int, tries int) (string, error) {
+func (s *Shortener) shortenWithUniqueID(raw string, length int, tries int) (string, error) {
 	for i := 0; i < tries; i++ {
 		id, err := randomstringbase(length)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("%w: %v", ErrGenerateID, err)
 		}
-		if !s.repo.Exists(id) {
+
+		if s.repo.PutIfAbsent(id, raw) {
 			return id, nil
 		}
 	}
-	return "", errors.New("could not generate unique id")
+
+	return "", ErrGenerateID
 }
 
 func randomstringbase(n int) (string, error) {
 	if n <= 0 {
 		return "", errors.New("invalid length")
 	}
+
 	buf := make([]byte, n)
 	if _, err := rand.Read(buf); err != nil {
 		return "", err
 	}
+
 	out := make([]byte, n)
 	for i := 0; i < n; i++ {
 		out[i] = stringbase[int(buf[i])%len(stringbase)]
 	}
+
 	return string(out), nil
 }
 
@@ -76,11 +97,14 @@ func validateURL(raw string) error {
 	if err != nil {
 		return err
 	}
+
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return errors.New("unsupported scheme")
+		return ErrUnsupportedScheme
 	}
+
 	if u.Host == "" {
-		return errors.New("empty host")
+		return ErrEmptyHost
 	}
+
 	return nil
 }
