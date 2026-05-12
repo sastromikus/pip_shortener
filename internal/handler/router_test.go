@@ -58,7 +58,7 @@ func TestGET_Redirect_Returns307AndLocation(t *testing.T) {
 
 	const id = "TESTID12"
 	const original = "https://example.com/path"
-	repo.Put(id, original)
+	repo.PutIfAbsent(id, original)
 
 	req := httptest.NewRequest(http.MethodGet, "http://localhost:8080/"+id, nil)
 	w := httptest.NewRecorder()
