@@ -2,14 +2,8 @@ package repository
 
 import "sync"
 
-type URLRepository interface {
-	Get(id string) (string, bool)
-	Put(id string, original string)
-	Exists(id string) bool
-}
-
 type MemoryRepository struct {
-	mu   sync.RWMutex
+	mu   sync.Mutex
 	data map[string]string
 }
 
@@ -20,21 +14,21 @@ func NewMemoryRepository() *MemoryRepository {
 }
 
 func (r *MemoryRepository) Get(id string) (string, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	v, ok := r.data[id]
 	return v, ok
 }
 
-func (r *MemoryRepository) Put(id string, original string) {
+func (r *MemoryRepository) PutIfAbsent(id string, original string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.data[id] = original
-}
 
-func (r *MemoryRepository) Exists(id string) bool {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	_, ok := r.data[id]
-	return ok
+	if _, ok := r.data[id]; ok {
+		return false
+	}
+
+	r.data[id] = original
+	return true
 }

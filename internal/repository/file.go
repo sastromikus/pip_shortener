@@ -9,7 +9,7 @@ import (
 )
 
 type FileRepository struct {
-	mu   sync.RWMutex
+	mu   sync.Mutex
 	path string
 	data map[string]string
 	seq  int
@@ -39,26 +39,24 @@ func NewFileRepository(path string) (*FileRepository, error) {
 }
 
 func (r *FileRepository) Get(id string) (string, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	v, ok := r.data[id]
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
+	v, ok := r.data[id]
 	return v, ok
 }
 
-func (r *FileRepository) Put(id string, original string) {
+func (r *FileRepository) PutIfAbsent(id string, original string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	if _, ok := r.data[id]; ok {
+		return false
+	}
+
 	r.data[id] = original
 	_ = r.saveLocked()
-}
-
-func (r *FileRepository) Exists(id string) bool {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	_, ok := r.data[id]
-
-	return ok
+	return true
 }
 
 func (r *FileRepository) load() error {
@@ -85,7 +83,6 @@ func (r *FileRepository) load() error {
 	maxUUID := 0
 	for _, rec := range recs {
 		r.data[rec.ShortURL] = rec.OriginalURL
-
 		if n, ok := atoi(rec.UUID); ok && n > maxUUID {
 			maxUUID = n
 		}
@@ -127,7 +124,6 @@ func (r *FileRepository) saveLocked() error {
 
 func atoi(s string) (int, bool) {
 	n := 0
-
 	if s == "" {
 		return 0, false
 	}
@@ -156,6 +152,6 @@ func itoa(n int) string {
 	for i, j := 0, len(buf)-1; i < j; i, j = i+1, j-1 {
 		buf[i], buf[j] = buf[j], buf[i]
 	}
-	
+
 	return string(buf)
 }

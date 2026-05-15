@@ -9,7 +9,7 @@ import (
 )
 
 type apiShortenRequest struct {
-    URL string `json:"url"`
+	URL string `json:"url"`
 }
 
 type apiShortenResponse struct {
@@ -23,7 +23,7 @@ func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, w http.Res
 		return
 	}
 
-	body, err := readBody(r, maxPOSTBody)
+	body, err := readBody(w, r, maxPOSTBody)
 	if err != nil {
 		badRequest(w)
 		return
@@ -41,16 +41,20 @@ func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, w http.Res
 		return
 	}
 
-	id, err := svc.Shorten(raw)
+	userID := getOrCreateUserID(w, r)
+	id, err := svc.ShortenForUser(raw, userID)
 	if err != nil {
-		badRequest(w)
+		writeShortenError(w, err)
 		return
 	}
 
-	shortURL := strings.TrimRight(baseURL, "/") + "/" + id
-	resp := apiShortenResponse{Result: shortURL}
+	shortURL, err := buildShortURL(baseURL, id)
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(apiShortenResponse{Result: shortURL})
 }

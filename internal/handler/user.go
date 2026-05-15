@@ -27,8 +27,14 @@ func handleUserURLs(svc *service.Shortener, baseURL string, w http.ResponseWrite
 
 	resp := make([]userURLResponse, 0, len(items))
 	for _, item := range items {
+		shortURL, err := buildShortURL(baseURL, item.ID)
+		if err != nil {
+			http.Error(w, "internal server error", http.StatusInternalServerError)
+			return
+		}
+
 		resp = append(resp, userURLResponse{
-			ShortURL:    baseURL + "/" + item.ID,
+			ShortURL:    shortURL,
 			OriginalURL: item.OriginalURL,
 		})
 	}
@@ -44,7 +50,6 @@ func getOrCreateUserID(w http.ResponseWriter, r *http.Request) string {
 	}
 
 	userID := randomUserID()
-
 	http.SetCookie(w, &http.Cookie{
 		Name:     userCookieName,
 		Value:    userID,
