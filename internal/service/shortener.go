@@ -19,11 +19,12 @@ var (
 	ErrUnsupportedScheme = errors.New("unsupported scheme")
 	ErrEmptyHost         = errors.New("empty host")
 	ErrGenerateID        = errors.New("could not generate unique id")
+	ErrStorage           = errors.New("storage error")
 )
 
 type URLRepository interface {
 	Get(id string) (string, bool)
-	PutIfAbsent(id string, original string) bool
+	PutIfAbsent(id string, original string) (bool, error)
 }
 
 type UserURL struct {
@@ -110,7 +111,11 @@ func (s *Shortener) shortenWithUniqueID(raw string, length int, tries int) (stri
 			return "", fmt.Errorf("%w: %v", ErrGenerateID, err)
 		}
 
-		if s.repo.PutIfAbsent(id, raw) {
+		created, err := s.repo.PutIfAbsent(id, raw)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", ErrStorage, err)
+		}
+		if created {
 			return id, nil
 		}
 	}

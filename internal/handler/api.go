@@ -41,7 +41,12 @@ func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, w http.Res
 		return
 	}
 
-	userID := getOrCreateUserID(w, r)
+	userID, err := getOrCreateUserID(w, r)
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
 	id, err := svc.ShortenForUser(raw, userID)
 	if err != nil {
 		writeShortenError(w, err)

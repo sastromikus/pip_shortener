@@ -65,7 +65,12 @@ func handleShorten(svc *service.Shortener, baseURL string, w http.ResponseWriter
 		return
 	}
 
-	userID := getOrCreateUserID(w, r)
+	userID, err := getOrCreateUserID(w, r)
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
 	id, err := svc.ShortenForUser(raw, userID)
 	if err != nil {
 		writeShortenError(w, err)
@@ -111,7 +116,7 @@ func buildShortURL(baseURL string, id string) (string, error) {
 }
 
 func writeShortenError(w http.ResponseWriter, err error) {
-	if errors.Is(err, service.ErrGenerateID) {
+	if errors.Is(err, service.ErrGenerateID) || errors.Is(err, service.ErrStorage) {
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}

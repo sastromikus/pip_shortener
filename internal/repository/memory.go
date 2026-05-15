@@ -21,14 +21,14 @@ func (r *MemoryRepository) Get(id string) (string, bool) {
 	return v, ok
 }
 
-func (r *MemoryRepository) PutIfAbsent(id string, original string) bool {
+func (r *MemoryRepository) PutIfAbsent(id string, original string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if _, ok := r.data[id]; ok {
-		return false
+		return false, nil
 	}
 
 	r.data[id] = original
-	return true
+	return true, nil
 }

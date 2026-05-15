@@ -17,7 +17,11 @@ type userURLResponse struct {
 }
 
 func handleUserURLs(svc *service.Shortener, baseURL string, w http.ResponseWriter, r *http.Request) {
-	userID := getOrCreateUserID(w, r)
+	userID, err := getOrCreateUserID(w, r)
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
 
 	items := svc.UserURLs(userID)
 	if len(items) == 0 {
@@ -44,12 +48,16 @@ func handleUserURLs(svc *service.Shortener, baseURL string, w http.ResponseWrite
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-func getOrCreateUserID(w http.ResponseWriter, r *http.Request) string {
+func getOrCreateUserID(w http.ResponseWriter, r *http.Request) (string, error) {
 	if c, err := r.Cookie(userCookieName); err == nil && c.Value != "" {
-		return c.Value
+		return c.Value, nil
 	}
 
-	userID := randomUserID()
+	userID, err := randomUserID()
+	if err != nil {
+		return "", err
+	}
+
 	http.SetCookie(w, &http.Cookie{
 		Name:     userCookieName,
 		Value:    userID,
@@ -57,14 +65,14 @@ func getOrCreateUserID(w http.ResponseWriter, r *http.Request) string {
 		HttpOnly: true,
 	})
 
-	return userID
+	return userID, nil
 }
 
-func randomUserID() string {
+func randomUserID() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		return "anonymous"
+		return "", err
 	}
 
-	return hex.EncodeToString(b)
+	return hex.EncodeToString(b), nil
 }
