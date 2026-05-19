@@ -1,2 +1,2 @@
-ALTER TABLE urls
-ADD CONSTRAINT urls_original_url_uq UNIQUE (original_url);
+CREATE UNIQUE INDEX IF NOT EXISTS urls_original_url_idx
+ON urls (original_url);
