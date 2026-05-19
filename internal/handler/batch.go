@@ -25,7 +25,7 @@ func handleAPIPostShortenBatchJSON(svc *service.Shortener, baseURL string, w htt
 		return
 	}
 
-	body, err := readBody(r, maxPOSTBody)
+	body, err := readBody(w, r, maxPOSTBody)
 	if err != nil {
 		badRequest(w)
 		return
@@ -41,9 +41,7 @@ func handleAPIPostShortenBatchJSON(svc *service.Shortener, baseURL string, w htt
 		return
 	}
 
-	baseURL = strings.TrimRight(baseURL, "/")
-
-	out := make([]apiBatchResponseItem, 0, len(in))
+	items := make([]service.BatchItem, 0, len(in))
 	for _, item := range in {
 		cid := strings.TrimSpace(item.CorrelationID)
 		orig := strings.TrimSpace(item.OriginalURL)
@@ -52,19 +50,37 @@ func handleAPIPostShortenBatchJSON(svc *service.Shortener, baseURL string, w htt
 			return
 		}
 
-		id, err := svc.Shorten(orig)
+		items = append(items, service.BatchItem{
+			CorrelationID: cid,
+			OriginalURL:   orig,
+		})
+	}
+
+	results, err := svc.ShortenBatch(items)
+	if err != nil {
+		writeShortenError(w, err)
+		return
+	}
+
+	out := make([]apiBatchResponseItem, 0, len(results))
+	for _, item := range results {
+		shortURL, err := buildShortURL(baseURL, item.ID)
 		if err != nil {
-			badRequest(w)
+			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
 
 		out = append(out, apiBatchResponseItem{
-			CorrelationID: cid,
-			ShortURL:      baseURL + "/" + id,
+			CorrelationID: item.CorrelationID,
+			ShortURL:      shortURL,
 		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(out)
+
+	if err := json.NewEncoder(w).Encode(out); err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
 }

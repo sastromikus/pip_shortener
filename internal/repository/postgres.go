@@ -49,17 +49,36 @@ func (r *PostgresRepository) Exists(id string) bool {
 	return exists
 }
 
+func (r *PostgresRepository) PutIfAbsent(id string, original string) (bool, error) {
+	res, err := r.db.ExecContext(context.Background(),
+		`INSERT INTO urls (short_id, original_url)
+		 VALUES ($1, $2)
+		 ON CONFLICT (short_id) DO NOTHING`,
+		id, original,
+	)
+	if err != nil {
+		return false, err
+	}
+
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+
+	return rows > 0, nil
+}
+
 func (r *PostgresRepository) GetByOriginal(original string) (string, bool) {
-    var shortID string
-    err := r.db.QueryRowContext(context.Background(),
-        `SELECT short_id FROM urls WHERE original_url = $1`, original,
-    ).Scan(&shortID)
+	var shortID string
+	err := r.db.QueryRowContext(context.Background(),
+		`SELECT short_id FROM urls WHERE original_url = $1`, original,
+	).Scan(&shortID)
 
-    if err != nil {
-        return "", false
-    }
+	if err != nil {
+		return "", false
+	}
 
-    return shortID, true
+	return shortID, true
 }
 
 func (r *PostgresRepository) Insert(id, original string) error {
@@ -76,7 +95,7 @@ func IsUniqueViolationOn(err error, constraint string) bool {
 	if !ok {
 		return false
 	}
-	
+
 	if string(pqe.Code) != "23505" {
 		return false
 	}

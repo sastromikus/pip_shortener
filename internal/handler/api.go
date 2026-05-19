@@ -9,7 +9,7 @@ import (
 )
 
 type apiShortenRequest struct {
-    URL string `json:"url"`
+	URL string `json:"url"`
 }
 
 type apiShortenResponse struct {
@@ -23,7 +23,7 @@ func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, w http.Res
 		return
 	}
 
-	body, err := readBody(r, maxPOSTBody)
+	body, err := readBody(w, r, maxPOSTBody)
 	if err != nil {
 		badRequest(w)
 		return
@@ -41,20 +41,34 @@ func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, w http.Res
 		return
 	}
 
-	id, existed, err := svc.ShortenWithExisting(raw)
+	userID, err := getOrCreateUserID(w, r)
 	if err != nil {
-		badRequest(w)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 
-	shortURL := strings.TrimRight(baseURL, "/") + "/" + id
-	resp := apiShortenResponse{Result: shortURL}
+	id, existed, err := svc.ShortenWithExistingForUser(raw, userID)
+	if err != nil {
+		writeShortenError(w, err)
+		return
+	}
+
+	shortURL, err := buildShortURL(baseURL, id)
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
+
 	if existed {
 		w.WriteHeader(http.StatusConflict)
 	} else {
 		w.WriteHeader(http.StatusCreated)
 	}
-	_ = json.NewEncoder(w).Encode(resp)
+
+	if err := json.NewEncoder(w).Encode(apiShortenResponse{Result: shortURL}); err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
 }

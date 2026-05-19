@@ -10,18 +10,18 @@ import (
 type gzipResponseWriter struct {
 	http.ResponseWriter
 
-	gw           *gzip.Writer
-	writer       io.Writer
-	wroteHeader  bool
-	shouldGzip   bool
-	status       int
+	gw          *gzip.Writer
+	writer      io.Writer
+	wroteHeader bool
+	shouldGzip  bool
+	status      int
 }
 
 func (w *gzipResponseWriter) WriteHeader(code int) {
 	if w.wroteHeader {
 		return
 	}
-	
+
 	w.wroteHeader = true
 	w.status = code
 

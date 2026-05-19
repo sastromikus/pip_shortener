@@ -9,16 +9,26 @@ import (
 
 type LogResponseWriter struct {
 	http.ResponseWriter
-	status int
-	size   int
+	status      int
+	size        int
+	wroteHeader bool
 }
 
 func (w *LogResponseWriter) WriteHeader(code int) {
+	if w.wroteHeader {
+		return
+	}
+
+	w.wroteHeader = true
 	w.status = code
 	w.ResponseWriter.WriteHeader(code)
 }
 
 func (w *LogResponseWriter) Write(p []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+
 	n, err := w.ResponseWriter.Write(p)
 	w.size += n
 	return n, err

@@ -2,59 +2,68 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
-	"database/sql"
+
+	_ "github.com/lib/pq"
+	"github.com/sirupsen/logrus"
 
 	"github.com/sastromikus/pip_shortener/internal/config"
 	"github.com/sastromikus/pip_shortener/internal/handler"
 	"github.com/sastromikus/pip_shortener/internal/repository"
 	"github.com/sastromikus/pip_shortener/internal/service"
-
-    "github.com/sirupsen/logrus"
-
-    _ "github.com/lib/pq"
 )
 
 func main() {
-	var repo repository.URLRepository
-	var db *sql.DB
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
 
+func run() error {
 	cfg := config.Parse()
-	log.Printf("DatabaseDSN=%q", cfg.DatabaseDSN)
+
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)
+
+	var (
+		repo service.URLRepository
+		db   *sql.DB
+	)
 
 	if cfg.DatabaseDSN != "" {
 		d, err := sql.Open("postgres", cfg.DatabaseDSN)
 		if err != nil {
-			log.Fatalf("db open: %v", err)
+			return fmt.Errorf("db open: %w", err)
 		}
 		db = d
+		defer db.Close()
 
 		if err := repository.RunSQLMigration(db, "migrations/0001_create_urls.sql"); err != nil {
-			log.Fatalf("migrations: %v", err)
+			return fmt.Errorf("migrations 0001_create_urls: %w", err)
 		}
 		if err := repository.RunSQLMigration(db, "migrations/0002_unique_original.sql"); err != nil {
-			log.Fatalf("migrations: %v", err)
+			return fmt.Errorf("migrations 0002_unique_original: %w", err)
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		if err := db.PingContext(ctx); err != nil {
-			log.Printf("db ping failed: %v", err)
+		pingCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		if err := db.PingContext(pingCtx); err != nil {
+			cancel()
+			return fmt.Errorf("db ping: %w", err)
 		}
+		cancel()
 
 		repo = repository.NewPostgresRepository(db)
-
 	} else if cfg.FileStoragePath != "" {
 		fileRepo, err := repository.NewFileRepository(cfg.FileStoragePath)
 		if err != nil {
-			log.Fatalf("file repository: %v", err)
+			return fmt.Errorf("file repository: %w", err)
 		}
 		repo = fileRepo
 	} else {
@@ -65,28 +74,40 @@ func main() {
 	router := handler.NewRouter(svc, cfg.BaseURL, logger, db)
 
 	srv := &http.Server{
-	    Addr: cfg.ServerAddr,
-	    Handler: router,
+		Addr:    cfg.ServerAddr,
+		Handler: router,
 	}
+
+	serverErr := make(chan error, 1)
 
 	go func() {
 		log.Printf("listening on http://%s\n", cfg.ServerAddr)
+
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("error: %v", err)
+			serverErr <- err
+			return
 		}
+
+		serverErr <- nil
 	}()
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if db != nil {
-	    _ = db.Close()
+	select {
+	case <-ctx.Done():
+	case err := <-serverErr:
+		return err
 	}
 
-	_ = srv.Shutdown(ctx)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("server shutdown error: %v", err)
+		return err
+	}
+
 	log.Println("shutdown")
+	return nil
 }

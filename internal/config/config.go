@@ -6,29 +6,27 @@ import (
 )
 
 type Config struct {
-	ServerAddr string
-	BaseURL    string
+	ServerAddr      string
+	BaseURL         string
 	FileStoragePath string
-	DatabaseDSN string
+	DatabaseDSN     string
 }
 
 const (
-	defaultServerAddr 		= "localhost:8080"
-	defaultBaseURL    		= "http://localhost:8080"
+	defaultServerAddr      = "localhost:8080"
+	defaultBaseURL         = "http://localhost:8080"
+	defaultFileStoragePath = "storage.json"
 
-	envServerAddr 			= "SERVER_ADDRESS"
-	envBaseURL    			= "BASE_URL"
-
-	defaultFileStoragePath 	= "storage.json"
-	envFileStoragePath 		= "FILE_STORAGE_PATH"
-
-	envDatabaseDSN = "DATABASE_DSN"
+	envServerAddr      = "SERVER_ADDRESS"
+	envBaseURL         = "BASE_URL"
+	envFileStoragePath = "FILE_STORAGE_PATH"
+	envDatabaseDSN     = "DATABASE_DSN"
 )
 
 func Parse() Config {
 	cfg := Config{
 		ServerAddr:      defaultServerAddr,
-		BaseURL:		 defaultBaseURL,
+		BaseURL:         defaultBaseURL,
 		FileStoragePath: defaultFileStoragePath,
 	}
 
@@ -37,9 +35,9 @@ func Parse() Config {
 	var flagFile string
 	var flagDSN string
 
-	flag.StringVar(&flagFile, "f", "", "File storage path")
 	flag.StringVar(&flagAddr, "a", "", "HTTP server address")
 	flag.StringVar(&flagBase, "b", "", "Base URL for short links")
+	flag.StringVar(&flagFile, "f", "", "File storage path")
 	flag.StringVar(&flagDSN, "d", "", "Database DSN")
 	flag.Parse()
 
@@ -52,8 +50,8 @@ func Parse() Config {
 	if flagFile != "" {
 		cfg.FileStoragePath = flagFile
 	}
-	if flagDSN != "" { 
-		cfg.DatabaseDSN = flagDSN 
+	if flagDSN != "" {
+		cfg.DatabaseDSN = flagDSN
 	}
 
 	if v := os.Getenv(envServerAddr); v != "" {
@@ -65,8 +63,8 @@ func Parse() Config {
 	if v := os.Getenv(envFileStoragePath); v != "" {
 		cfg.FileStoragePath = v
 	}
-	if v := os.Getenv(envDatabaseDSN); v != "" { 
-		cfg.DatabaseDSN = v 
+	if v := os.Getenv(envDatabaseDSN); v != "" {
+		cfg.DatabaseDSN = v
 	}
 
 	return cfg
