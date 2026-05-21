@@ -1,6 +1,10 @@
 package repository
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/sastromikus/pip_shortener/internal/model"
+)
 
 type MemoryRepository struct {
 	mu   sync.Mutex
@@ -44,6 +48,21 @@ func (r *MemoryRepository) PutIfAbsent(id string, original string) (bool, error)
 
 	r.data[id] = original
 	return true, nil
+}
+
+func (r *MemoryRepository) PutBatchIfAbsent(items []model.URLItem) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for _, item := range items {
+		if _, ok := r.data[item.ID]; ok {
+			continue
+		}
+
+		r.data[item.ID] = item.Original
+	}
+
+	return nil
 }
 
 func (r *MemoryRepository) Delete(id string) {

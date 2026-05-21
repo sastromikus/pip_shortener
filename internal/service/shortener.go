@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+
+	"github.com/sastromikus/pip_shortener/internal/model"
 )
 
 const (
@@ -26,6 +28,7 @@ type URLRepository interface {
 	Get(id string) (string, bool)
 	GetByOriginal(original string) (string, bool)
 	PutIfAbsent(id string, original string) (bool, error)
+	PutBatchIfAbsent(items []model.URLItem) error
 }
 
 type UserURL struct {
@@ -103,17 +106,44 @@ func (s *Shortener) ShortenWithExistingForUser(raw string, userID string) (strin
 
 func (s *Shortener) ShortenBatch(items []BatchItem) ([]BatchResult, error) {
 	results := make([]BatchResult, 0, len(items))
+	toCreate := make([]model.URLItem, 0, len(items))
 
 	for _, item := range items {
-		id, _, err := s.ShortenWithExisting(item.OriginalURL)
+		normalized, err := normalizeURL(item.OriginalURL)
 		if err != nil {
 			return nil, err
+		}
+
+		if existingID, ok := s.repo.GetByOriginal(normalized); ok {
+			results = append(results, BatchResult{
+				CorrelationID: item.CorrelationID,
+				ID:            existingID,
+			})
+			continue
+		}
+
+		id, err := randomstringbase(idLen)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrGenerateID, err)
 		}
 
 		results = append(results, BatchResult{
 			CorrelationID: item.CorrelationID,
 			ID:            id,
 		})
+
+		toCreate = append(toCreate, model.URLItem{
+			ID:       id,
+			Original: normalized,
+		})
+	}
+
+	if len(toCreate) == 0 {
+		return results, nil
+	}
+
+	if err := s.repo.PutBatchIfAbsent(toCreate); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrStorage, err)
 	}
 
 	return results, nil

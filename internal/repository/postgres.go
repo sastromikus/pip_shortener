@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
+
+	"github.com/sastromikus/pip_shortener/internal/model"
 )
 
 type PostgresRepository struct {
@@ -62,6 +65,33 @@ func (r *PostgresRepository) PutIfAbsent(id string, original string) (bool, erro
 	}
 
 	return rows > 0, nil
+}
+
+func (r *PostgresRepository) PutBatchIfAbsent(items []model.URLItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+
+	var b strings.Builder
+	args := make([]any, 0, len(items)*2)
+
+	b.WriteString(`INSERT INTO urls (short_id, original_url) VALUES `)
+
+	for i, item := range items {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+
+		argPos := i*2 + 1
+		b.WriteString(fmt.Sprintf("($%d, $%d)", argPos, argPos+1))
+
+		args = append(args, item.ID, item.Original)
+	}
+
+	b.WriteString(` ON CONFLICT DO NOTHING`)
+
+	_, err := r.db.ExecContext(context.TODO(), b.String(), args...)
+	return err
 }
 
 func NewPostgresStorage(ctx context.Context, dsn string) (*sql.DB, *PostgresRepository, error) {

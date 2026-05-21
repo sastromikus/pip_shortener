@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+
+	"github.com/sastromikus/pip_shortener/internal/model"
 )
 
 type FileRepository struct {
@@ -60,6 +62,34 @@ func (r *FileRepository) PutIfAbsent(id string, original string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+func (r *FileRepository) PutBatchIfAbsent(items []model.URLItem) error {
+	createdIDs := make([]string, 0, len(items))
+
+	for _, item := range items {
+		created, err := r.mem.PutIfAbsent(item.ID, item.Original)
+		if err != nil {
+			return err
+		}
+
+		if created {
+			createdIDs = append(createdIDs, item.ID)
+		}
+	}
+
+	if len(createdIDs) == 0 {
+		return nil
+	}
+
+	if err := r.save(); err != nil {
+		for _, id := range createdIDs {
+			r.mem.Delete(id)
+		}
+		return err
+	}
+
+	return nil
 }
 
 func (r *FileRepository) load() error {
