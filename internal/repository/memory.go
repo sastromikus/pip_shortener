@@ -45,3 +45,22 @@ func (r *MemoryRepository) PutIfAbsent(id string, original string) (bool, error)
 	r.data[id] = original
 	return true, nil
 }
+
+func (r *MemoryRepository) Delete(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	delete(r.data, id)
+}
+
+func (r *MemoryRepository) Items() map[string]string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	out := make(map[string]string, len(r.data))
+	for id, original := range r.data {
+		out[id] = original
+	}
+
+	return out
+}
