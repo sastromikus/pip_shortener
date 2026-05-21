@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	_ "github.com/lib/pq"
+	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/sastromikus/pip_shortener/internal/config"
 	"github.com/sastromikus/pip_shortener/internal/handler"
@@ -37,28 +37,18 @@ func run() error {
 	)
 
 	if cfg.DatabaseDSN != "" {
-		d, err := sql.Open("postgres", cfg.DatabaseDSN)
+		dbCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		postgresDB, postgresRepo, err := repository.NewPostgresStorage(dbCtx, cfg.DatabaseDSN)
 		if err != nil {
-			return fmt.Errorf("db open: %w", err)
+			return err
 		}
-		db = d
+
+		db = postgresDB
 		defer db.Close()
 
-		if err := repository.RunSQLMigration(db, "migrations/0001_create_urls.sql"); err != nil {
-			return fmt.Errorf("migrations 0001_create_urls: %w", err)
-		}
-		if err := repository.RunSQLMigration(db, "migrations/0002_unique_original.sql"); err != nil {
-			return fmt.Errorf("migrations 0002_unique_original: %w", err)
-		}
-
-		pingCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		if err := db.PingContext(pingCtx); err != nil {
-			cancel()
-			return fmt.Errorf("db ping: %w", err)
-		}
-		cancel()
-
-		repo = repository.NewPostgresRepository(db)
+		repo = postgresRepo
 	} else if cfg.FileStoragePath != "" {
 		fileRepo, err := repository.NewFileRepository(cfg.FileStoragePath)
 		if err != nil {

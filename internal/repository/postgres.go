@@ -3,8 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
-
-	"github.com/lib/pq"
+	"fmt"
 )
 
 type PostgresRepository struct {
@@ -17,8 +16,10 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 
 func (r *PostgresRepository) Get(id string) (string, bool) {
 	var original string
+
 	err := r.db.QueryRowContext(context.Background(),
-		`SELECT original_url FROM urls WHERE short_id = $1`, id,
+		`SELECT original_url FROM urls WHERE short_id = $1`,
+		id,
 	).Scan(&original)
 
 	if err != nil {
@@ -28,25 +29,19 @@ func (r *PostgresRepository) Get(id string) (string, bool) {
 	return original, true
 }
 
-func (r *PostgresRepository) Put(id string, original string) {
-	_, _ = r.db.ExecContext(context.Background(),
-		`INSERT INTO urls (short_id, original_url) VALUES ($1, $2)
-		 ON CONFLICT (short_id) DO UPDATE SET original_url = EXCLUDED.original_url`,
-		id, original,
-	)
-}
+func (r *PostgresRepository) GetByOriginal(original string) (string, bool) {
+	var shortID string
 
-func (r *PostgresRepository) Exists(id string) bool {
-	var exists bool
 	err := r.db.QueryRowContext(context.Background(),
-		`SELECT EXISTS(SELECT 1 FROM urls WHERE short_id = $1)`, id,
-	).Scan(&exists)
+		`SELECT short_id FROM urls WHERE original_url = $1`,
+		original,
+	).Scan(&shortID)
 
 	if err != nil {
-		return false
+		return "", false
 	}
 
-	return exists
+	return shortID, true
 }
 
 func (r *PostgresRepository) PutIfAbsent(id string, original string) (bool, error) {
@@ -54,7 +49,8 @@ func (r *PostgresRepository) PutIfAbsent(id string, original string) (bool, erro
 		`INSERT INTO urls (short_id, original_url)
 		 VALUES ($1, $2)
 		 ON CONFLICT (short_id) DO NOTHING`,
-		id, original,
+		id,
+		original,
 	)
 	if err != nil {
 		return false, err
@@ -68,37 +64,36 @@ func (r *PostgresRepository) PutIfAbsent(id string, original string) (bool, erro
 	return rows > 0, nil
 }
 
-func (r *PostgresRepository) GetByOriginal(original string) (string, bool) {
-	var shortID string
-	err := r.db.QueryRowContext(context.Background(),
-		`SELECT short_id FROM urls WHERE original_url = $1`, original,
-	).Scan(&shortID)
-
+func NewPostgresStorage(ctx context.Context, dsn string) (*sql.DB, *PostgresRepository, error) {
+	db, err := sql.Open("pgx", dsn)
 	if err != nil {
-		return "", false
+		return nil, nil, fmt.Errorf("open postgres: %w", err)
 	}
 
-	return shortID, true
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, nil, fmt.Errorf("ping postgres: %w", err)
+	}
+
+	if err := RunPostgresMigrations(db); err != nil {
+		_ = db.Close()
+		return nil, nil, fmt.Errorf("run postgres migrations: %w", err)
+	}
+
+	return db, NewPostgresRepository(db), nil
 }
 
-func (r *PostgresRepository) Insert(id, original string) error {
-	_, err := r.db.ExecContext(context.Background(),
-		`INSERT INTO urls (short_id, original_url) VALUES ($1,$2)`,
-		id, original,
-	)
-
-	return err
-}
-
-func IsUniqueViolationOn(err error, constraint string) bool {
-	pqe, ok := err.(*pq.Error)
-	if !ok {
-		return false
+func RunPostgresMigrations(db *sql.DB) error {
+	migrations := []string{
+		"migrations/0001_create_urls.sql",
+		"migrations/0002_unique_original.sql",
 	}
 
-	if string(pqe.Code) != "23505" {
-		return false
+	for _, path := range migrations {
+		if err := RunSQLMigration(db, path); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
 	}
 
-	return pqe.Constraint == constraint
+	return nil
 }
