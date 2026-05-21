@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/sastromikus/pip_shortener/internal/service"
@@ -75,7 +76,7 @@ func getOrCreateUserID(w http.ResponseWriter, r *http.Request) (string, error) {
 func randomUserID() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to generate a random user ID: %w", err)
 	}
 
 	return hex.EncodeToString(b), nil
