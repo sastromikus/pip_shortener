@@ -17,7 +17,7 @@ func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 func (r *PostgresRepository) Get(id string) (string, bool) {
 	var original string
 
-	err := r.db.QueryRowContext(context.Background(),
+	err := r.db.QueryRowContext(context.TODO(),
 		`SELECT original_url FROM urls WHERE short_id = $1`,
 		id,
 	).Scan(&original)
@@ -32,7 +32,7 @@ func (r *PostgresRepository) Get(id string) (string, bool) {
 func (r *PostgresRepository) GetByOriginal(original string) (string, bool) {
 	var shortID string
 
-	err := r.db.QueryRowContext(context.Background(),
+	err := r.db.QueryRowContext(context.TODO(),
 		`SELECT short_id FROM urls WHERE original_url = $1`,
 		original,
 	).Scan(&shortID)
@@ -45,7 +45,7 @@ func (r *PostgresRepository) GetByOriginal(original string) (string, bool) {
 }
 
 func (r *PostgresRepository) PutIfAbsent(id string, original string) (bool, error) {
-	res, err := r.db.ExecContext(context.Background(),
+	res, err := r.db.ExecContext(context.TODO(),
 		`INSERT INTO urls (short_id, original_url)
 		 VALUES ($1, $2)
 		 ON CONFLICT (short_id) DO NOTHING`,
