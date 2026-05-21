@@ -106,6 +106,9 @@ func (s *Shortener) ShortenWithExistingForUser(raw string, userID string) (strin
 
 func (s *Shortener) ShortenBatch(items []BatchItem) ([]BatchResult, error) {
 	results := make([]BatchResult, 0, len(items))
+	normalizedByIndex := make([]string, 0, len(items))
+	idByOriginal := make(map[string]string, len(items))
+	usedIDs := make(map[string]struct{}, len(items))
 	toCreate := make([]model.URLItem, 0, len(items))
 
 	for _, item := range items {
@@ -114,23 +117,29 @@ func (s *Shortener) ShortenBatch(items []BatchItem) ([]BatchResult, error) {
 			return nil, err
 		}
 
-		if existingID, ok := s.repo.GetByOriginal(normalized); ok {
-			results = append(results, BatchResult{
-				CorrelationID: item.CorrelationID,
-				ID:            existingID,
-			})
+		normalizedByIndex = append(normalizedByIndex, normalized)
+		results = append(results, BatchResult{
+			CorrelationID: item.CorrelationID,
+		})
+
+		if id, ok := idByOriginal[normalized]; ok {
+			results[len(results)-1].ID = id
 			continue
 		}
 
-		id, err := randomstringbase(idLen)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrGenerateID, err)
+		if existingID, ok := s.repo.GetByOriginal(normalized); ok {
+			idByOriginal[normalized] = existingID
+			results[len(results)-1].ID = existingID
+			continue
 		}
 
-		results = append(results, BatchResult{
-			CorrelationID: item.CorrelationID,
-			ID:            id,
-		})
+		id, err := s.generateBatchID(usedIDs, idLen, 10)
+		if err != nil {
+			return nil, err
+		}
+
+		idByOriginal[normalized] = id
+		results[len(results)-1].ID = id
 
 		toCreate = append(toCreate, model.URLItem{
 			ID:       id,
@@ -146,7 +155,46 @@ func (s *Shortener) ShortenBatch(items []BatchItem) ([]BatchResult, error) {
 		return nil, fmt.Errorf("%w: %v", ErrStorage, err)
 	}
 
+	for _, item := range toCreate {
+		if storedOriginal, ok := s.repo.Get(item.ID); ok && storedOriginal == item.Original {
+			continue
+		}
+
+		existingID, ok := s.repo.GetByOriginal(item.Original)
+		if !ok {
+			return nil, ErrStorage
+		}
+
+		idByOriginal[item.Original] = existingID
+	}
+
+	for i, normalized := range normalizedByIndex {
+		results[i].ID = idByOriginal[normalized]
+	}
+
 	return results, nil
+}
+
+func (s *Shortener) generateBatchID(used map[string]struct{}, length int, tries int) (string, error) {
+	for i := 0; i < tries; i++ {
+		id, err := randomstringbase(length)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", ErrGenerateID, err)
+		}
+
+		if _, ok := used[id]; ok {
+			continue
+		}
+
+		if _, ok := s.repo.Get(id); ok {
+			continue
+		}
+
+		used[id] = struct{}{}
+		return id, nil
+	}
+
+	return "", ErrGenerateID
 }
 
 func (s *Shortener) UserURLs(userID string) []UserURL {
