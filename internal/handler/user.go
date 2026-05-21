@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/sastromikus/pip_shortener/internal/service"
@@ -17,10 +18,10 @@ type userURLResponse struct {
 	OriginalURL string `json:"original_url"`
 }
 
-func handleUserURLs(svc *service.Shortener, baseURL string, w http.ResponseWriter, r *http.Request) {
+func handleUserURLs(svc *service.Shortener, baseURL string, logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
 	userID, err := getOrCreateUserID(w, r)
 	if err != nil {
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		internalServerError(logger, w, "create user id", err)
 		return
 	}
 
@@ -34,7 +35,7 @@ func handleUserURLs(svc *service.Shortener, baseURL string, w http.ResponseWrite
 	for _, item := range items {
 		shortURL, err := buildShortURL(baseURL, item.ID)
 		if err != nil {
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			internalServerError(logger, w, "build user short url", err)
 			return
 		}
 
@@ -48,7 +49,7 @@ func handleUserURLs(svc *service.Shortener, baseURL string, w http.ResponseWrite
 	w.WriteHeader(http.StatusOK)
 
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		internalServerError(logger, w, "encode user urls response", err)
 		return
 	}
 }

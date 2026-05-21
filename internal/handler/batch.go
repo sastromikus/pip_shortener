@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -18,7 +19,7 @@ type apiBatchResponseItem struct {
 	ShortURL      string `json:"short_url"`
 }
 
-func handleAPIPostShortenBatchJSON(svc *service.Shortener, baseURL string, w http.ResponseWriter, r *http.Request) {
+func handleAPIPostShortenBatchJSON(svc *service.Shortener, baseURL string, logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
 	ct := r.Header.Get("Content-Type")
 	if ct == "" || !strings.HasPrefix(strings.ToLower(ct), "application/json") {
 		badRequest(w)
@@ -58,7 +59,7 @@ func handleAPIPostShortenBatchJSON(svc *service.Shortener, baseURL string, w htt
 
 	results, err := svc.ShortenBatch(items)
 	if err != nil {
-		writeShortenError(w, err)
+		writeShortenError(logger, w, err)
 		return
 	}
 
@@ -66,7 +67,7 @@ func handleAPIPostShortenBatchJSON(svc *service.Shortener, baseURL string, w htt
 	for _, item := range results {
 		shortURL, err := buildShortURL(baseURL, item.ID)
 		if err != nil {
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			internalServerError(logger, w, "build batch short url", err)
 			return
 		}
 
@@ -80,7 +81,7 @@ func handleAPIPostShortenBatchJSON(svc *service.Shortener, baseURL string, w htt
 	w.WriteHeader(http.StatusCreated)
 
 	if err := json.NewEncoder(w).Encode(out); err != nil {
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		internalServerError(logger, w, "encode batch shorten response", err)
 		return
 	}
 }
