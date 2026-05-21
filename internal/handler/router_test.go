@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,15 +13,12 @@ import (
 
 	"github.com/sastromikus/pip_shortener/internal/repository"
 	"github.com/sastromikus/pip_shortener/internal/service"
-
-	"github.com/sirupsen/logrus"
 )
 
 func TestPOST_Shorten_Returns201AndShortURL(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
-	logger := logrus.New()
-	logger.SetLevel(logrus.InfoLevel)
+	logger := slog.Default()
 	h := NewRouter(svc, "http://localhost:8080", logger, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/", strings.NewReader("https://practicum.yandex.ru/"))
@@ -61,8 +59,7 @@ func TestPOST_Shorten_Returns201AndShortURL(t *testing.T) {
 func TestGET_Redirect_Returns307AndLocation(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
-	logger := logrus.New()
-	logger.SetLevel(logrus.InfoLevel)
+	logger := slog.Default()
 	h := NewRouter(svc, "http://localhost:8080", logger, nil)
 
 	const id = "TESTID12"
@@ -87,8 +84,7 @@ func TestGET_Redirect_Returns307AndLocation(t *testing.T) {
 func TestInvalidRequests_Return400(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
-	logger := logrus.New()
-	logger.SetLevel(logrus.InfoLevel)
+	logger := slog.Default()
 	h := NewRouter(svc, "http://localhost:8080", logger, nil)
 
 	tests := []struct {
@@ -150,8 +146,7 @@ func TestPOST_APIShorten_ReturnsJSON(t *testing.T) {
 
 	baseURL := "http://localhost:8080"
 
-	logger := logrus.New()
-	logger.SetLevel(logrus.InfoLevel)
+	logger := slog.Default()
 
 	h := NewRouter(svc, baseURL, logger, nil)
 
@@ -195,8 +190,7 @@ func TestAPIShorten_GzipResponse(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
 
-	logger := logrus.New()
-	logger.SetLevel(logrus.InfoLevel)
+	logger := slog.Default()
 
 	baseURL := "http://localhost:8080"
 	h := NewRouter(svc, baseURL, logger, nil)
@@ -245,8 +239,7 @@ func TestAPIShorten_GzipRequest(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
 
-	logger := logrus.New()
-	logger.SetLevel(logrus.InfoLevel)
+	logger := slog.Default()
 
 	baseURL := "http://localhost:8080"
 	h := NewRouter(svc, baseURL, logger, nil)
@@ -276,8 +269,7 @@ func TestPOST_APIShortenBatch_ReturnsJSON(t *testing.T) {
 	svc := service.NewShortener(repo)
 
 	baseURL := "http://localhost:8080"
-	logger := logrus.New()
-	logger.SetLevel(logrus.InfoLevel)
+	logger := slog.Default()
 
 	h := NewRouter(svc, baseURL, logger, nil)
 

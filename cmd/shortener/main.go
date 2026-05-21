@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -12,7 +12,6 @@ import (
 	"time"
 
 	_ "github.com/lib/pq"
-	"github.com/sirupsen/logrus"
 
 	"github.com/sastromikus/pip_shortener/internal/config"
 	"github.com/sastromikus/pip_shortener/internal/handler"
@@ -22,15 +21,15 @@ import (
 
 func main() {
 	if err := run(); err != nil {
-		log.Fatal(err)
+		slog.Error("application failed", "error", err)
+		os.Exit(1)
 	}
 }
 
 func run() error {
 	cfg := config.Parse()
 
-	logger := logrus.New()
-	logger.SetLevel(logrus.InfoLevel)
+	logger := slog.Default()
 
 	var (
 		repo service.URLRepository
@@ -81,7 +80,7 @@ func run() error {
 	serverErr := make(chan error, 1)
 
 	go func() {
-		log.Printf("listening on http://%s\n", cfg.ServerAddr)
+		logger.Info("listening on", "addr", cfg.ServerAddr)
 
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			serverErr <- err
@@ -104,10 +103,10 @@ func run() error {
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("server shutdown error: %v", err)
+		logger.Error("server shutdown error", "error", err)
 		return err
 	}
 
-	log.Println("shutdown")
+	logger.Info("shutdown")
 	return nil
 }
