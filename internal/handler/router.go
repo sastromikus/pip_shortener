@@ -4,12 +4,12 @@ import (
 	"database/sql"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/sirupsen/logrus"
 
 	"github.com/sastromikus/pip_shortener/internal/handler/middleware"
 	"github.com/sastromikus/pip_shortener/internal/service"
@@ -17,7 +17,7 @@ import (
 
 const maxPOSTBody = 8 << 10
 
-func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger, db *sql.DB) http.Handler {
+func NewRouter(svc *service.Shortener, baseURL string, logger *slog.Logger, db *sql.DB) http.Handler {
 	baseURL = strings.TrimRight(baseURL, "/")
 
 	r := chi.NewRouter()
@@ -76,7 +76,7 @@ func handleShorten(svc *service.Shortener, baseURL string, w http.ResponseWriter
 
 	userID, err := getOrCreateUserID(w, r)
 	if err != nil {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
@@ -88,7 +88,7 @@ func handleShorten(svc *service.Shortener, baseURL string, w http.ResponseWriter
 
 	shortURL, err := buildShortURL(baseURL, id)
 	if err != nil {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
@@ -131,7 +131,7 @@ func buildShortURL(baseURL string, id string) (string, error) {
 
 func writeShortenError(w http.ResponseWriter, err error) {
 	if errors.Is(err, service.ErrGenerateID) || errors.Is(err, service.ErrStorage) {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 

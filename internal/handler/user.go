@@ -19,7 +19,7 @@ type userURLResponse struct {
 func handleUserURLs(svc *service.Shortener, baseURL string, w http.ResponseWriter, r *http.Request) {
 	userID, err := getOrCreateUserID(w, r)
 	if err != nil {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
@@ -33,7 +33,7 @@ func handleUserURLs(svc *service.Shortener, baseURL string, w http.ResponseWrite
 	for _, item := range items {
 		shortURL, err := buildShortURL(baseURL, item.ID)
 		if err != nil {
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			return
 		}
 
@@ -45,7 +45,11 @@ func handleUserURLs(svc *service.Shortener, baseURL string, w http.ResponseWrite
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(resp)
+
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
 }
 
 func getOrCreateUserID(w http.ResponseWriter, r *http.Request) (string, error) {

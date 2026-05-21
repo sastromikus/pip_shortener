@@ -66,7 +66,7 @@ func handleAPIPostShortenBatchJSON(svc *service.Shortener, baseURL string, w htt
 	for _, item := range results {
 		shortURL, err := buildShortURL(baseURL, item.ID)
 		if err != nil {
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			return
 		}
 
@@ -80,7 +80,7 @@ func handleAPIPostShortenBatchJSON(svc *service.Shortener, baseURL string, w htt
 	w.WriteHeader(http.StatusCreated)
 
 	if err := json.NewEncoder(w).Encode(out); err != nil {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 }

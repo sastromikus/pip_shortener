@@ -43,7 +43,7 @@ func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, w http.Res
 
 	userID, err := getOrCreateUserID(w, r)
 	if err != nil {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
@@ -55,7 +55,7 @@ func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, w http.Res
 
 	shortURL, err := buildShortURL(baseURL, id)
 	if err != nil {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
@@ -68,7 +68,7 @@ func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, w http.Res
 	}
 
 	if err := json.NewEncoder(w).Encode(apiShortenResponse{Result: shortURL}); err != nil {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 }
