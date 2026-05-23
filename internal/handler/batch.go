@@ -22,47 +22,49 @@ type apiBatchResponseItem struct {
 func handleAPIPostShortenBatchJSON(svc *service.Shortener, baseURL string, w http.ResponseWriter, r *http.Request) {
 	ct := r.Header.Get("Content-Type")
 	if ct == "" || !strings.HasPrefix(strings.ToLower(ct), "application/json") {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
-	body, err := readBody(r, maxPOSTBody)
+	body, err := readBody(w, r, maxPOSTBody)
 	if err != nil {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
 	var in []apiBatchRequestItem
 	if err := json.Unmarshal(body, &in); err != nil {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 	if len(in) == 0 {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
-	baseURL = strings.TrimRight(baseURL, "/")
-	userID, _ := middleware.UserIDFromContext(r.Context())
-
-	out := make([]apiBatchResponseItem, 0, len(in))
+	items := make([]service.BatchItem, 0, len(in))
 	for _, item := range in {
 		cid := strings.TrimSpace(item.CorrelationID)
 		orig := strings.TrimSpace(item.OriginalURL)
 		if cid == "" || orig == "" {
-			badRequest(w)
+			writeStatus(w, http.StatusBadRequest)
 			return
 		}
+		items = append(items, service.BatchItem{CorrelationID: cid, OriginalURL: orig})
+	}
 
-		id, _, err := svc.ShortenForUser(orig, userID)
-		if err != nil {
-			badRequest(w)
-			return
-		}
+	userID, _ := middleware.UserIDFromContext(r.Context())
+	results, err := svc.ShortenBatch(items, userID)
+	if err != nil {
+		writeStatus(w, statusFromServiceError(err))
+		return
+	}
 
+	out := make([]apiBatchResponseItem, 0, len(results))
+	for _, result := range results {
 		out = append(out, apiBatchResponseItem{
-			CorrelationID: cid,
-			ShortURL:      baseURL + "/" + id,
+			CorrelationID: result.CorrelationID,
+			ShortURL:      joinURL(baseURL, result.ID),
 		})
 	}
 

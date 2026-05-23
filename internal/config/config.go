@@ -13,16 +13,14 @@ type Config struct {
 }
 
 const (
-	defaultServerAddr = "localhost:8080"
-	defaultBaseURL    = "http://localhost:8080"
-
-	envServerAddr = "SERVER_ADDRESS"
-	envBaseURL    = "BASE_URL"
-
+	defaultServerAddr      = "localhost:8080"
+	defaultBaseURL         = "http://localhost:8080"
 	defaultFileStoragePath = "storage.json"
-	envFileStoragePath     = "FILE_STORAGE_PATH"
 
-	envDatabaseDSN = "DATABASE_DSN"
+	envServerAddr      = "SERVER_ADDRESS"
+	envBaseURL         = "BASE_URL"
+	envFileStoragePath = "FILE_STORAGE_PATH"
+	envDatabaseDSN     = "DATABASE_DSN"
 )
 
 func Parse() Config {
@@ -57,20 +55,17 @@ func Parse() Config {
 	if flagDSN != "" {
 		cfg.DatabaseDSN = flagDSN
 	}
-	if v := os.Getenv("DATABASE_DSN"); v != "" {
-		cfg.DatabaseDSN = v
-	}
 
-	if v := os.Getenv(envServerAddr); v != "" {
+	if v, ok := os.LookupEnv(envServerAddr); ok {
 		cfg.ServerAddr = v
 	}
-	if v := os.Getenv(envBaseURL); v != "" {
+	if v, ok := os.LookupEnv(envBaseURL); ok {
 		cfg.BaseURL = v
 	}
-	if v := os.Getenv(envFileStoragePath); v != "" {
+	if v, ok := os.LookupEnv(envFileStoragePath); ok {
 		cfg.FileStoragePath = v
 	}
-	if v := os.Getenv(envDatabaseDSN); v != "" {
+	if v, ok := os.LookupEnv(envDatabaseDSN); ok {
 		cfg.DatabaseDSN = v
 	}
 

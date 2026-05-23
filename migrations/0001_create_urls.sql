@@ -1,5 +1,5 @@
 CREATE TABLE IF NOT EXISTS urls (
     id SERIAL PRIMARY KEY,
-    short_id TEXT NOT NULL UNIQUE,
+    short_id VARCHAR(32) NOT NULL UNIQUE,
     original_url TEXT NOT NULL
 );

@@ -3,21 +3,19 @@ package repository
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
+	"strconv"
+
+	"github.com/sastromikus/pip_shortener/internal/model"
 )
 
 type FileRepository struct {
-	mu   sync.RWMutex
-	path string
-	data map[string]string
-	seq  int
-
+	path        string
 	usersPath   string
-	user        map[string]map[string]struct{}
 	deletedPath string
-	deleted     map[string]bool
+	mem         *MemoryRepository
 }
 
 type fileRecord struct {
@@ -33,53 +31,115 @@ func NewFileRepository(path string) (*FileRepository, error) {
 
 	r := &FileRepository{
 		path:        path,
-		data:        make(map[string]string),
 		usersPath:   path + ".users",
-		user:        make(map[string]map[string]struct{}),
 		deletedPath: path + ".deleted",
-		deleted:     make(map[string]bool),
+		mem:         NewMemoryRepository(),
 	}
 
 	if err := r.load(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("load file storage: %w", err)
 	}
 	if err := r.loadUsers(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("load user file storage: %w", err)
 	}
 	if err := r.loadDeleted(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("load deleted file storage: %w", err)
 	}
 
 	return r, nil
 }
 
 func (r *FileRepository) Get(id string) (string, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	v, ok := r.data[id]
-
-	return v, ok
+	return r.mem.Get(id)
 }
 
+func (r *FileRepository) GetWithDeleted(id string) (string, bool, bool) {
+	return r.mem.GetWithDeleted(id)
+}
+
+func (r *FileRepository) GetByOriginal(original string) (string, bool) {
+	return r.mem.GetByOriginal(original)
+}
+
+func (r *FileRepository) PutIfAbsent(id string, original string) (bool, error) {
+	created, err := r.mem.PutIfAbsent(id, original)
+	if err != nil {
+		return false, err
+	}
+	if !created {
+		return false, nil
+	}
+
+	if err := r.save(); err != nil {
+		r.mem.Delete(id)
+		return false, err
+	}
+
+	return true, nil
+}
+
+func (r *FileRepository) PutBatchIfAbsent(items []model.URLItem) error {
+	createdIDs := make([]string, 0, len(items))
+
+	for _, item := range items {
+		created, err := r.mem.PutIfAbsent(item.ID, item.Original)
+		if err != nil {
+			return err
+		}
+		if created {
+			createdIDs = append(createdIDs, item.ID)
+		}
+	}
+
+	if len(createdIDs) == 0 {
+		return nil
+	}
+
+	if err := r.save(); err != nil {
+		for _, id := range createdIDs {
+			r.mem.Delete(id)
+		}
+		return err
+	}
+
+	return nil
+}
+
+// Put is kept for tests and simple compatibility. Business code should prefer PutIfAbsent.
 func (r *FileRepository) Put(id string, original string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.data[id] = original
-	_ = r.saveLocked()
+	_, _ = r.PutIfAbsent(id, original)
 }
 
 func (r *FileRepository) Exists(id string) bool {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	_, ok := r.data[id]
-
+	_, ok := r.mem.Get(id)
 	return ok
 }
 
-func (r *FileRepository) load() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+func (r *FileRepository) AddUserURL(userID, shortID string) error {
+	return r.AddUserURLs(userID, []string{shortID})
+}
 
+func (r *FileRepository) AddUserURLs(userID string, shortIDs []string) error {
+	if err := r.mem.AddUserURLs(userID, shortIDs); err != nil {
+		return err
+	}
+
+	return r.saveUsers()
+}
+
+func (r *FileRepository) ListUserURLs(userID string) ([]model.UserURL, error) {
+	return r.mem.ListUserURLs(userID)
+}
+
+func (r *FileRepository) MarkDeleted(userID string, ids []string) error {
+	if err := r.mem.MarkDeleted(userID, ids); err != nil {
+		return err
+	}
+
+	return r.saveDeleted()
+}
+
+func (r *FileRepository) load() error {
 	b, err := os.ReadFile(r.path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -87,7 +147,6 @@ func (r *FileRepository) load() error {
 		}
 		return err
 	}
-
 	if len(b) == 0 {
 		return nil
 	}
@@ -97,82 +156,32 @@ func (r *FileRepository) load() error {
 		return err
 	}
 
-	maxUUID := 0
 	for _, rec := range recs {
-		r.data[rec.ShortURL] = rec.OriginalURL
-
-		if n, ok := atoi(rec.UUID); ok && n > maxUUID {
-			maxUUID = n
-		}
+		_, _ = r.mem.PutIfAbsent(rec.ShortURL, rec.OriginalURL)
 	}
-	r.seq = maxUUID
 
 	return nil
 }
 
-func (r *FileRepository) saveLocked() error {
-	dir := filepath.Dir(r.path)
-	if dir != "." && dir != "" {
-		_ = os.MkdirAll(dir, 0o755)
+func (r *FileRepository) save() error {
+	if err := ensureParentDir(r.path); err != nil {
+		return err
 	}
 
-	records := make([]fileRecord, 0, len(r.data))
+	items := r.mem.Items()
+	records := make([]fileRecord, 0, len(items))
+
 	i := 0
-	for id, original := range r.data {
+	for id, original := range items {
 		i++
 		records = append(records, fileRecord{
-			UUID:        itoa(i),
+			UUID:        strconv.Itoa(i),
 			ShortURL:    id,
 			OriginalURL: original,
 		})
 	}
 
-	b, err := json.MarshalIndent(records, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	tmp := r.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-
-	return os.Rename(tmp, r.path)
-}
-
-func atoi(s string) (int, bool) {
-	n := 0
-
-	if s == "" {
-		return 0, false
-	}
-
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return 0, false
-		}
-		n = n*10 + int(c-'0')
-	}
-
-	return n, true
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-
-	buf := make([]byte, 0, 10)
-	for n > 0 {
-		buf = append(buf, byte('0'+n%10))
-		n /= 10
-	}
-
-	for i, j := 0, len(buf)-1; i < j; i, j = i+1, j-1 {
-		buf[i], buf[j] = buf[j], buf[i]
-	}
-
-	return string(buf)
+	return writeJSONAtomic(r.path, records)
 }
 
 func (r *FileRepository) loadUsers() error {
@@ -187,86 +196,26 @@ func (r *FileRepository) loadUsers() error {
 		return nil
 	}
 
-	var m map[string][]string
-	if err := json.Unmarshal(b, &m); err != nil {
+	var items map[string][]string
+	if err := json.Unmarshal(b, &items); err != nil {
 		return err
 	}
 
-	for uid, ids := range m {
-		set := make(map[string]struct{})
+	for userID, ids := range items {
 		for _, id := range ids {
-			if id == "" {
-				continue
-			}
-			set[id] = struct{}{}
+			r.mem.LoadUserURL(userID, id)
 		}
-		r.user[uid] = set
 	}
 
 	return nil
 }
 
-func (r *FileRepository) saveUsersLocked() error {
-	dir := filepath.Dir(r.usersPath)
-	if dir != "." && dir != "" {
-		_ = os.MkdirAll(dir, 0o755)
-	}
-
-	m := make(map[string][]string, len(r.user))
-	for uid, set := range r.user {
-		ids := make([]string, 0, len(set))
-		for id := range set {
-			ids = append(ids, id)
-		}
-		m[uid] = ids
-	}
-
-	b, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
+func (r *FileRepository) saveUsers() error {
+	if err := ensureParentDir(r.usersPath); err != nil {
 		return err
 	}
 
-	tmp := r.usersPath + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-
-	return os.Rename(tmp, r.usersPath)
-}
-
-func (r *FileRepository) AddUserURL(userID, shortID string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	set, ok := r.user[userID]
-	if !ok {
-		set = make(map[string]struct{})
-		r.user[userID] = set
-	}
-	set[shortID] = struct{}{}
-
-	return r.saveUsersLocked()
-}
-
-func (r *FileRepository) ListUserURLs(userID string) ([]UserURL, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	set := r.user[userID]
-	if len(set) == 0 {
-		return nil, nil
-	}
-
-	out := make([]UserURL, 0, len(set))
-	for id := range set {
-		orig, ok := r.data[id]
-		if !ok {
-			continue
-		}
-		out = append(out, UserURL{ShortID: id, Original: orig})
-	}
-
-	return out, nil
+	return writeJSONAtomic(r.usersPath, r.mem.UserItems())
 }
 
 func (r *FileRepository) loadDeleted() error {
@@ -287,66 +236,39 @@ func (r *FileRepository) loadDeleted() error {
 	}
 
 	for _, id := range ids {
-		if id != "" {
-			r.deleted[id] = true
-		}
+		r.mem.LoadDeleted(id)
 	}
 
 	return nil
 }
 
-func (r *FileRepository) saveDeletedLocked() error {
-	dir := filepath.Dir(r.deletedPath)
-	if dir != "." && dir != "" {
-		_ = os.MkdirAll(dir, 0o755)
+func (r *FileRepository) saveDeleted() error {
+	if err := ensureParentDir(r.deletedPath); err != nil {
+		return err
 	}
 
-	ids := make([]string, 0, len(r.deleted))
-	for id, deleted := range r.deleted {
-		if deleted {
-			ids = append(ids, id)
-		}
+	return writeJSONAtomic(r.deletedPath, r.mem.DeletedItems())
+}
+
+func ensureParentDir(path string) error {
+	dir := filepath.Dir(path)
+	if dir == "." || dir == "" {
+		return nil
 	}
 
-	b, err := json.MarshalIndent(ids, "", "  ")
+	return os.MkdirAll(dir, 0o755)
+}
+
+func writeJSONAtomic(path string, v any) error {
+	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	tmp := r.deletedPath + ".tmp"
+	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return err
 	}
 
-	return os.Rename(tmp, r.deletedPath)
-}
-
-func (r *FileRepository) GetWithDeleted(id string) (string, bool, bool) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	original, ok := r.data[id]
-	if !ok {
-		return "", false, false
-	}
-
-	return original, true, r.deleted[id]
-}
-
-func (r *FileRepository) MarkDeleted(userID string, ids []string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	set := r.user[userID]
-	if len(set) == 0 {
-		return nil
-	}
-
-	for _, id := range ids {
-		if _, ok := set[id]; ok {
-			r.deleted[id] = true
-		}
-	}
-
-	return r.saveDeletedLocked()
+	return os.Rename(tmp, path)
 }

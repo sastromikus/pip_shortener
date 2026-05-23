@@ -1,10 +1,9 @@
 package middleware
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
-
-	"github.com/sirupsen/logrus"
 )
 
 type LogResponseWriter struct {
@@ -14,18 +13,26 @@ type LogResponseWriter struct {
 }
 
 func (w *LogResponseWriter) WriteHeader(code int) {
+	if w.status != 0 {
+		return
+	}
 	w.status = code
 	w.ResponseWriter.WriteHeader(code)
 }
 
 func (w *LogResponseWriter) Write(p []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
 	n, err := w.ResponseWriter.Write(p)
 	w.size += n
 	return n, err
 }
 
-func Logger(logger *logrus.Logger) func(http.Handler) http.Handler {
-	logger.SetLevel(logrus.InfoLevel)
+func Logger(logger *slog.Logger) func(http.Handler) http.Handler {
+	if logger == nil {
+		logger = slog.Default()
+	}
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -38,13 +45,13 @@ func Logger(logger *logrus.Logger) func(http.Handler) http.Handler {
 				lw.status = http.StatusOK
 			}
 
-			logger.WithFields(logrus.Fields{
-				"method":   r.Method,
-				"uri":      r.RequestURI,
-				"duration": time.Since(start).String(),
-				"status":   lw.status,
-				"size":     lw.size,
-			}).Info("request")
+			logger.Info("request",
+				"method", r.Method,
+				"uri", r.RequestURI,
+				"duration", time.Since(start).String(),
+				"status", lw.status,
+				"size", lw.size,
+			)
 		})
 	}
 }

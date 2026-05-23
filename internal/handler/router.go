@@ -4,20 +4,20 @@ import (
 	"database/sql"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/sastromikus/pip_shortener/internal/service"
-
 	"github.com/sastromikus/pip_shortener/internal/handler/middleware"
-	"github.com/sirupsen/logrus"
+	"github.com/sastromikus/pip_shortener/internal/service"
 )
 
 const maxPOSTBody = 8 << 10
 
-func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger, db *sql.DB) http.Handler {
+func NewRouter(svc *service.Shortener, baseURL string, logger *slog.Logger, db *sql.DB) http.Handler {
 	baseURL = strings.TrimRight(baseURL, "/")
 
 	r := chi.NewRouter()
@@ -25,36 +25,29 @@ func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger, db
 	r.Use(middleware.Gzip())
 	r.Use(middleware.Logger(logger))
 
-	r.NotFound(func(w http.ResponseWriter, r *http.Request) { badRequest(w) })
-	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) { badRequest(w) })
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) { writeStatus(w, http.StatusBadRequest) })
+	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) { writeStatus(w, http.StatusBadRequest) })
 
 	r.Post("/", func(w http.ResponseWriter, r *http.Request) {
 		handleShorten(svc, baseURL, w, r)
 	})
-
 	r.Post("/api/shorten", func(w http.ResponseWriter, r *http.Request) {
 		handleAPIPostShortenJSON(svc, baseURL, w, r)
 	})
-
 	r.Post("/api/shorten/batch", func(w http.ResponseWriter, r *http.Request) {
 		handleAPIPostShortenBatchJSON(svc, baseURL, w, r)
 	})
-
 	r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
 		handlePing(db, w, r)
 	})
-
 	r.Get("/api/user/urls", func(w http.ResponseWriter, r *http.Request) {
 		handleGetUserURLs(svc, baseURL, w, r)
 	})
-
 	r.Delete("/api/user/urls", func(w http.ResponseWriter, r *http.Request) {
 		handleDeleteUserURLs(svc, w, r)
 	})
-
 	r.Get("/{id}", func(w http.ResponseWriter, r *http.Request) {
-		id := chi.URLParam(r, "id")
-		handleRedirect(svc, id, w, r)
+		handleRedirect(svc, chi.URLParam(r, "id"), w, r)
 	})
 
 	return r
@@ -64,30 +57,30 @@ func handleShorten(svc *service.Shortener, baseURL string, w http.ResponseWriter
 	ct := strings.ToLower(r.Header.Get("Content-Type"))
 	ce := strings.ToLower(r.Header.Get("Content-Encoding"))
 	if ct == "" || !(strings.HasPrefix(ct, "text/plain") || (strings.Contains(ce, "gzip") && strings.HasPrefix(ct, "application/x-gzip"))) {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
-	body, err := readBody(r, maxPOSTBody)
+	body, err := readBody(w, r, maxPOSTBody)
 	if err != nil {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
 	raw := strings.TrimSpace(string(body))
 	if raw == "" {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
 	userID, _ := middleware.UserIDFromContext(r.Context())
 	id, existed, err := svc.ShortenForUser(raw, userID)
 	if err != nil {
-		badRequest(w)
+		writeStatus(w, statusFromServiceError(err))
 		return
 	}
 
-	shortURL := baseURL + "/" + id
+	shortURL := joinURL(baseURL, id)
 
 	w.Header().Set("Content-Type", "text/plain")
 	if existed {
@@ -101,11 +94,11 @@ func handleShorten(svc *service.Shortener, baseURL string, w http.ResponseWriter
 func handleRedirect(svc *service.Shortener, id string, w http.ResponseWriter, r *http.Request) {
 	original, ok, deleted := svc.ResolveWithDeleted(id)
 	if !ok {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 	if deleted {
-		w.WriteHeader(http.StatusGone)
+		writeStatus(w, http.StatusGone)
 		return
 	}
 
@@ -113,19 +106,31 @@ func handleRedirect(svc *service.Shortener, id string, w http.ResponseWriter, r 
 	w.WriteHeader(http.StatusTemporaryRedirect)
 }
 
-func readBody(r *http.Request, limit int64) ([]byte, error) {
+func readBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, error) {
 	defer r.Body.Close()
-	lr := &io.LimitedReader{R: r.Body, N: limit + 1}
-	b, err := io.ReadAll(lr)
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(b)) > limit {
-		return nil, errors.New("body too large")
-	}
-	return b, nil
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+	return io.ReadAll(r.Body)
 }
 
-func badRequest(w http.ResponseWriter) {
-	w.WriteHeader(http.StatusBadRequest)
+func joinURL(baseURL string, id string) string {
+	joined, err := url.JoinPath(baseURL, id)
+	if err != nil {
+		return strings.TrimRight(baseURL, "/") + "/" + id
+	}
+	return joined
+}
+
+func statusFromServiceError(err error) int {
+	if errors.Is(err, service.ErrEmptyURL) ||
+		errors.Is(err, service.ErrUnsupportedScheme) ||
+		errors.Is(err, service.ErrEmptyHost) ||
+		errors.Is(err, service.ErrGenerateID) {
+		return http.StatusBadRequest
+	}
+
+	return http.StatusInternalServerError
+}
+
+func writeStatus(w http.ResponseWriter, status int) {
+	http.Error(w, http.StatusText(status), status)
 }
