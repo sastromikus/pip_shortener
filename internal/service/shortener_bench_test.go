@@ -1,0 +1,20 @@
+package service
+
+import (
+	"fmt"
+	"testing"
+
+	"github.com/sastromikus/pip_shortener/internal/repository"
+)
+
+func BenchmarkShorten(b *testing.B) {
+	repo := repository.NewMemoryRepository()
+	svc := NewShortener(repo)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, _ = svc.Shorten(fmt.Sprintf("http://example.com/benchmark/%d", i))
+	}
+}
