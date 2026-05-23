@@ -23,23 +23,23 @@ type apiBatchResponseItem struct {
 func handleAPIPostShortenBatchJSON(svc *service.Shortener, baseURL string, logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
 	ct := r.Header.Get("Content-Type")
 	if ct == "" || !strings.HasPrefix(strings.ToLower(ct), "application/json") {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
 	body, err := readBody(w, r, maxPOSTBody)
 	if err != nil {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
 	var in []apiBatchRequestItem
 	if err := json.Unmarshal(body, &in); err != nil {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 	if len(in) == 0 {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
@@ -48,35 +48,28 @@ func handleAPIPostShortenBatchJSON(svc *service.Shortener, baseURL string, logge
 		cid := strings.TrimSpace(item.CorrelationID)
 		orig := strings.TrimSpace(item.OriginalURL)
 		if cid == "" || orig == "" {
-			badRequest(w)
+			writeStatus(w, http.StatusBadRequest)
 			return
 		}
-
-		items = append(items, service.BatchItem{
-			CorrelationID: cid,
-			OriginalURL:   orig,
-		})
+		items = append(items, service.BatchItem{CorrelationID: cid, OriginalURL: orig})
 	}
 
 	userID, _ := middleware.UserIDFromContext(r.Context())
-
-	results, err := svc.ShortenBatchForUser(items, userID)
+	results, err := svc.ShortenBatch(items, userID)
 	if err != nil {
-		writeShortenError(logger, w, err)
+		status := statusFromServiceError(err)
+		if status == http.StatusInternalServerError {
+			logger.Error("batch shorten failed", "error", err)
+		}
+		writeStatus(w, status)
 		return
 	}
 
 	out := make([]apiBatchResponseItem, 0, len(results))
-	for _, item := range results {
-		shortURL, err := buildShortURL(baseURL, item.ID)
-		if err != nil {
-			internalServerError(logger, w, "build batch short url", err)
-			return
-		}
-
+	for _, result := range results {
 		out = append(out, apiBatchResponseItem{
-			CorrelationID: item.CorrelationID,
-			ShortURL:      shortURL,
+			CorrelationID: result.CorrelationID,
+			ShortURL:      joinURL(baseURL, result.ID),
 		})
 	}
 

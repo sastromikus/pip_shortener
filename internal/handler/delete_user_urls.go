@@ -11,35 +11,35 @@ import (
 
 func handleDeleteUserURLs(svc *service.Shortener, w http.ResponseWriter, r *http.Request) {
 	if middleware.BadCookieNoID(r.Context()) {
-		w.WriteHeader(http.StatusUnauthorized)
+		writeStatus(w, http.StatusUnauthorized)
 		return
 	}
 
 	userID, ok := middleware.UserIDFromContext(r.Context())
 	if !ok || strings.TrimSpace(userID) == "" {
-		w.WriteHeader(http.StatusUnauthorized)
+		writeStatus(w, http.StatusUnauthorized)
 		return
 	}
 
 	ct := r.Header.Get("Content-Type")
 	if ct == "" || !strings.HasPrefix(strings.ToLower(ct), "application/json") {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
 	body, err := readBody(w, r, maxPOSTBody)
 	if err != nil {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
 	var ids []string
 	if err := json.Unmarshal(body, &ids); err != nil {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 	if len(ids) == 0 {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 

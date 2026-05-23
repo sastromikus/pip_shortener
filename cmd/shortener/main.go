@@ -28,7 +28,6 @@ func main() {
 
 func run() error {
 	cfg := config.Parse()
-
 	logger := slog.Default()
 
 	var (
@@ -60,25 +59,23 @@ func run() error {
 	}
 
 	svc := service.NewShortener(repo)
-	svc.StartDeleteWorker(128, 500*time.Millisecond)
+	svc.StartDeleteWorker(128, 500*time.Millisecond, func(err error) {
+		logger.Error("delete worker failed", "error", err)
+	})
 
 	router := handler.NewRouter(svc, cfg.BaseURL, logger, db)
-
 	srv := &http.Server{
 		Addr:    cfg.ServerAddr,
 		Handler: router,
 	}
 
 	serverErr := make(chan error, 1)
-
 	go func() {
-		logger.Info("listening on", "addr", cfg.ServerAddr)
-
+		logger.Info("listening", "addr", cfg.ServerAddr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			serverErr <- err
 			return
 		}
-
 		serverErr <- nil
 	}()
 

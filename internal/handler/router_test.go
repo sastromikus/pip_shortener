@@ -18,8 +18,7 @@ import (
 func TestPOST_Shorten_Returns201AndShortURL(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
-	logger := slog.Default()
-	h := NewRouter(svc, "http://localhost:8080", logger, nil)
+	h := NewRouter(svc, "http://localhost:8080", slog.Default(), nil)
 
 	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/", strings.NewReader("https://practicum.yandex.ru/"))
 	req.Header.Set("Content-Type", "text/plain")
@@ -59,8 +58,7 @@ func TestPOST_Shorten_Returns201AndShortURL(t *testing.T) {
 func TestGET_Redirect_Returns307AndLocation(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
-	logger := slog.Default()
-	h := NewRouter(svc, "http://localhost:8080", logger, nil)
+	h := NewRouter(svc, "http://localhost:8080", slog.Default(), nil)
 
 	const id = "TESTID12"
 	const original = "https://example.com/path"
@@ -84,8 +82,7 @@ func TestGET_Redirect_Returns307AndLocation(t *testing.T) {
 func TestInvalidRequests_Return400(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
-	logger := slog.Default()
-	h := NewRouter(svc, "http://localhost:8080", logger, nil)
+	h := NewRouter(svc, "http://localhost:8080", slog.Default(), nil)
 
 	tests := []struct {
 		name string
@@ -146,9 +143,7 @@ func TestPOST_APIShorten_ReturnsJSON(t *testing.T) {
 
 	baseURL := "http://localhost:8080"
 
-	logger := slog.Default()
-
-	h := NewRouter(svc, baseURL, logger, nil)
+	h := NewRouter(svc, baseURL, slog.Default(), nil)
 
 	body := `{"url":"https://practicum.yandex.ru"}`
 	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/shorten", strings.NewReader(body))
@@ -190,10 +185,8 @@ func TestAPIShorten_GzipResponse(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
 
-	logger := slog.Default()
-
 	baseURL := "http://localhost:8080"
-	h := NewRouter(svc, baseURL, logger, nil)
+	h := NewRouter(svc, baseURL, slog.Default(), nil)
 
 	body := `{"url":"https://practicum.yandex.ru"}`
 	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/shorten", strings.NewReader(body))
@@ -239,10 +232,8 @@ func TestAPIShorten_GzipRequest(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
 
-	logger := slog.Default()
-
 	baseURL := "http://localhost:8080"
-	h := NewRouter(svc, baseURL, logger, nil)
+	h := NewRouter(svc, baseURL, slog.Default(), nil)
 
 	var buf bytes.Buffer
 	gw := gzip.NewWriter(&buf)
@@ -269,9 +260,7 @@ func TestPOST_APIShortenBatch_ReturnsJSON(t *testing.T) {
 	svc := service.NewShortener(repo)
 
 	baseURL := "http://localhost:8080"
-	logger := slog.Default()
-
-	h := NewRouter(svc, baseURL, logger, nil)
+	h := NewRouter(svc, baseURL, slog.Default(), nil)
 
 	body := `[{"correlation_id":"a1","original_url":"https://example.com/1"},{"correlation_id":"b2","original_url":"https://example.com/2"}]`
 	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/shorten/batch", strings.NewReader(body))

@@ -17,17 +17,21 @@ type userURLResponse struct {
 
 func handleUserURLs(svc *service.Shortener, baseURL string, logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
 	if middleware.BadCookieNoID(r.Context()) {
-		w.WriteHeader(http.StatusUnauthorized)
+		writeStatus(w, http.StatusUnauthorized)
 		return
 	}
 
 	userID, ok := middleware.UserIDFromContext(r.Context())
 	if !ok || strings.TrimSpace(userID) == "" {
-		w.WriteHeader(http.StatusUnauthorized)
+		writeStatus(w, http.StatusUnauthorized)
 		return
 	}
 
-	items := svc.UserURLs(userID)
+	items, err := svc.ListUserURLs(userID)
+	if err != nil {
+		internalServerError(logger, w, "list user urls", err)
+		return
+	}
 	if len(items) == 0 {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -35,15 +39,9 @@ func handleUserURLs(svc *service.Shortener, baseURL string, logger *slog.Logger,
 
 	resp := make([]userURLResponse, 0, len(items))
 	for _, item := range items {
-		shortURL, err := buildShortURL(baseURL, item.ID)
-		if err != nil {
-			internalServerError(logger, w, "build user short url", err)
-			return
-		}
-
 		resp = append(resp, userURLResponse{
-			ShortURL:    shortURL,
-			OriginalURL: item.OriginalURL,
+			ShortURL:    joinURL(baseURL, item.ShortID),
+			OriginalURL: item.Original,
 		})
 	}
 

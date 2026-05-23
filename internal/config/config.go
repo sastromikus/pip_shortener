@@ -56,16 +56,16 @@ func Parse() Config {
 		cfg.DatabaseDSN = flagDSN
 	}
 
-	if v, ok := os.LookupEnv(envServerAddr); ok && v != "" {
+	if v, ok := os.LookupEnv(envServerAddr); ok {
 		cfg.ServerAddr = v
 	}
-	if v, ok := os.LookupEnv(envBaseURL); ok && v != "" {
+	if v, ok := os.LookupEnv(envBaseURL); ok {
 		cfg.BaseURL = v
 	}
-	if v, ok := os.LookupEnv(envFileStoragePath); ok && v != "" {
+	if v, ok := os.LookupEnv(envFileStoragePath); ok {
 		cfg.FileStoragePath = v
 	}
-	if v, ok := os.LookupEnv(envDatabaseDSN); ok && v != "" {
+	if v, ok := os.LookupEnv(envDatabaseDSN); ok {
 		cfg.DatabaseDSN = v
 	}
 
