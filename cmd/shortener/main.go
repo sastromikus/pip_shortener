@@ -2,23 +2,23 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
-	"database/sql"
-	"path/filepath"
 
 	"github.com/sastromikus/pip_shortener/internal/config"
 	"github.com/sastromikus/pip_shortener/internal/handler"
 	"github.com/sastromikus/pip_shortener/internal/repository"
 	"github.com/sastromikus/pip_shortener/internal/service"
 
-    "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 
-    _ "github.com/lib/pq"
+	_ "github.com/lib/pq"
 )
 
 func migrationPaths() ([]string, error) {
@@ -108,12 +108,12 @@ func main() {
 	}
 
 	svc := service.NewShortener(repo)
-	svc.StartDeleteWorker(128, 500 * time.Millisecond)
+	svc.StartDeleteWorker(128, 500*time.Millisecond)
 	router := handler.NewRouter(svc, cfg.BaseURL, logger, db)
 
 	srv := &http.Server{
-	    Addr: cfg.ServerAddr,
-	    Handler: router,
+		Addr:    cfg.ServerAddr,
+		Handler: router,
 	}
 
 	go func() {
@@ -131,7 +131,7 @@ func main() {
 	defer cancel()
 
 	if db != nil {
-	    _ = db.Close()
+		_ = db.Close()
 	}
 
 	_ = srv.Shutdown(ctx)

@@ -9,14 +9,16 @@ type URLRepository interface {
 }
 
 type MemoryRepository struct {
-	mu   sync.RWMutex
-	data map[string]string
-	user map[string]map[string]struct{}
+	mu      sync.RWMutex
+	data    map[string]string
+	deleted map[string]bool
+	user    map[string]map[string]struct{}
 }
 
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
-		data: make(map[string]string),
+		data:    make(map[string]string),
+		deleted: make(map[string]bool),
 	}
 }
 
@@ -74,6 +76,39 @@ func (r *MemoryRepository) ListUserURLs(userID string) ([]UserURL, error) {
 		}
 		out = append(out, UserURL{ShortID: shortID, Original: orig})
 	}
-	
+
 	return out, nil
+}
+
+func (r *MemoryRepository) GetWithDeleted(id string) (string, bool, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	original, ok := r.data[id]
+	if !ok {
+		return "", false, false
+	}
+
+	return original, true, r.deleted[id]
+}
+
+func (r *MemoryRepository) MarkDeleted(userID string, ids []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	set := r.user[userID]
+	if len(set) == 0 {
+		return nil
+	}
+
+	if r.deleted == nil {
+		r.deleted = make(map[string]bool)
+	}
+	for _, id := range ids {
+		if _, ok := set[id]; ok {
+			r.deleted[id] = true
+		}
+	}
+
+	return nil
 }

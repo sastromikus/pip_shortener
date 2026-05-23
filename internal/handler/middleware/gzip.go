@@ -10,18 +10,18 @@ import (
 type gzipResponseWriter struct {
 	http.ResponseWriter
 
-	gw           *gzip.Writer
-	writer       io.Writer
-	wroteHeader  bool
-	shouldGzip   bool
-	status       int
+	gw          *gzip.Writer
+	writer      io.Writer
+	wroteHeader bool
+	shouldGzip  bool
+	status      int
 }
 
 func (w *gzipResponseWriter) WriteHeader(code int) {
 	if w.wroteHeader {
 		return
 	}
-	
+
 	w.wroteHeader = true
 	w.status = code
 
@@ -60,7 +60,7 @@ func (w *gzipResponseWriter) Close() error {
 func shouldCompressContentType(ct string) bool {
 	ct = strings.ToLower(ct)
 
-	return strings.HasPrefix(ct, "application/json") || strings.HasPrefix(ct, "text/html")
+	return strings.HasPrefix(ct, "application/json") || strings.HasPrefix(ct, "text/html") || strings.HasPrefix(ct, "text/plain")
 }
 
 func Gzip() func(http.Handler) http.Handler {

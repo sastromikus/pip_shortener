@@ -14,8 +14,10 @@ type FileRepository struct {
 	data map[string]string
 	seq  int
 
-	usersPath string
-	user      map[string]map[string]struct{}
+	usersPath   string
+	user        map[string]map[string]struct{}
+	deletedPath string
+	deleted     map[string]bool
 }
 
 type fileRecord struct {
@@ -30,20 +32,21 @@ func NewFileRepository(path string) (*FileRepository, error) {
 	}
 
 	r := &FileRepository{
-	    path:      path,
-	    data:      make(map[string]string),
-	    usersPath: path + ".users",
-	    user:      make(map[string]map[string]struct{}),
+		path:        path,
+		data:        make(map[string]string),
+		usersPath:   path + ".users",
+		user:        make(map[string]map[string]struct{}),
+		deletedPath: path + ".deleted",
+		deleted:     make(map[string]bool),
 	}
 
 	if err := r.load(); err != nil {
-	    return nil, err
+		return nil, err
 	}
 	if err := r.loadUsers(); err != nil {
-	    return nil, err
+		return nil, err
 	}
-
-	if err := r.load(); err != nil {
+	if err := r.loadDeleted(); err != nil {
 		return nil, err
 	}
 
@@ -168,7 +171,7 @@ func itoa(n int) string {
 	for i, j := 0, len(buf)-1; i < j; i, j = i+1, j-1 {
 		buf[i], buf[j] = buf[j], buf[i]
 	}
-	
+
 	return string(buf)
 }
 
@@ -241,7 +244,7 @@ func (r *FileRepository) AddUserURL(userID, shortID string) error {
 		r.user[userID] = set
 	}
 	set[shortID] = struct{}{}
-	
+
 	return r.saveUsersLocked()
 }
 
@@ -264,4 +267,86 @@ func (r *FileRepository) ListUserURLs(userID string) ([]UserURL, error) {
 	}
 
 	return out, nil
+}
+
+func (r *FileRepository) loadDeleted() error {
+	b, err := os.ReadFile(r.deletedPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if len(b) == 0 {
+		return nil
+	}
+
+	var ids []string
+	if err := json.Unmarshal(b, &ids); err != nil {
+		return err
+	}
+
+	for _, id := range ids {
+		if id != "" {
+			r.deleted[id] = true
+		}
+	}
+
+	return nil
+}
+
+func (r *FileRepository) saveDeletedLocked() error {
+	dir := filepath.Dir(r.deletedPath)
+	if dir != "." && dir != "" {
+		_ = os.MkdirAll(dir, 0o755)
+	}
+
+	ids := make([]string, 0, len(r.deleted))
+	for id, deleted := range r.deleted {
+		if deleted {
+			ids = append(ids, id)
+		}
+	}
+
+	b, err := json.MarshalIndent(ids, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	tmp := r.deletedPath + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+
+	return os.Rename(tmp, r.deletedPath)
+}
+
+func (r *FileRepository) GetWithDeleted(id string) (string, bool, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	original, ok := r.data[id]
+	if !ok {
+		return "", false, false
+	}
+
+	return original, true, r.deleted[id]
+}
+
+func (r *FileRepository) MarkDeleted(userID string, ids []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	set := r.user[userID]
+	if len(set) == 0 {
+		return nil
+	}
+
+	for _, id := range ids {
+		if _, ok := set[id]; ok {
+			r.deleted[id] = true
+		}
+	}
+
+	return r.saveDeletedLocked()
 }

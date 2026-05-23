@@ -61,9 +61,7 @@ func Auth() func(http.Handler) http.Handler {
 					return
 				}
 
-				newUID := newUserID()
-				http.SetCookie(w, buildCookie(newUID, secret))
-				ctx := context.WithValue(r.Context(), ctxUserIDKey, newUID)
+				ctx := context.WithValue(r.Context(), ctxBadCookieKey, true)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
@@ -84,7 +82,7 @@ func buildCookie(uid string, secret []byte) *http.Cookie {
 		Value:    val,
 		Path:     "/",
 		HttpOnly: true,
-		Expires: time.Now().Add(365 * 24 * time.Hour),
+		Expires:  time.Now().Add(365 * 24 * time.Hour),
 	}
 }
 
@@ -108,13 +106,13 @@ func verifyCookie(val string, secret []byte) (string, bool) {
 	}
 
 	want := signCookie(uid, secret)
-	
+
 	return uid, hmac.Equal([]byte(want), []byte(uid+":"+sig))
 }
 
 func newUserID() string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
-	
+
 	return hex.EncodeToString(b)
 }

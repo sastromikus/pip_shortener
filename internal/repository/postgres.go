@@ -60,16 +60,16 @@ func (r *PostgresRepository) Exists(id string) bool {
 }
 
 func (r *PostgresRepository) GetByOriginal(original string) (string, bool) {
-    var shortID string
-    err := r.db.QueryRowContext(context.Background(),
-        `SELECT short_id FROM urls WHERE original_url = $1`, original,
-    ).Scan(&shortID)
+	var shortID string
+	err := r.db.QueryRowContext(context.Background(),
+		`SELECT short_id FROM urls WHERE original_url = $1`, original,
+	).Scan(&shortID)
 
-    if err != nil {
-        return "", false
-    }
+	if err != nil {
+		return "", false
+	}
 
-    return shortID, true
+	return shortID, true
 }
 
 func (r *PostgresRepository) Insert(id, original string) error {
@@ -86,7 +86,7 @@ func IsUniqueViolationOn(err error, constraint string) bool {
 	if !ok {
 		return false
 	}
-	
+
 	if string(pqe.Code) != "23505" {
 		return false
 	}
@@ -126,41 +126,41 @@ func (r *PostgresRepository) ListUserURLs(userID string) ([]UserURL, error) {
 		out = append(out, UserURL{ShortID: shortID, Original: original})
 	}
 	if err := rows.Err(); err != nil {
-	    return nil, err
+		return nil, err
 	}
-	
+
 	return out, nil
 }
 
 func (r *PostgresRepository) GetWithDeleted(id string) (string, bool, bool) {
-    var original string
-    var deleted bool
+	var original string
+	var deleted bool
 
-    err := r.db.QueryRowContext(context.Background(),
-        `SELECT original_url, is_deleted FROM urls WHERE short_id = $1`, id,
-    ).Scan(&original, &deleted)
+	err := r.db.QueryRowContext(context.Background(),
+		`SELECT original_url, is_deleted FROM urls WHERE short_id = $1`, id,
+	).Scan(&original, &deleted)
 
-    if err != nil {
-        return "", false, false
-    }
+	if err != nil {
+		return "", false, false
+	}
 
-    return original, true, deleted
+	return original, true, deleted
 }
 
 func (r *PostgresRepository) MarkDeleted(userID string, ids []string) error {
-    if len(ids) == 0 {
-        return nil
-    }
+	if len(ids) == 0 {
+		return nil
+	}
 
-    _, err := r.db.ExecContext(context.Background(),
-        `UPDATE urls u
+	_, err := r.db.ExecContext(context.Background(),
+		`UPDATE urls u
            SET is_deleted = TRUE
           FROM user_urls uu
          WHERE uu.short_id = u.short_id
            AND uu.user_id = $1
            AND u.short_id = ANY($2)`,
-        userID, pq.Array(ids),
-    )
-    
-    return err
+		userID, pq.Array(ids),
+	)
+
+	return err
 }

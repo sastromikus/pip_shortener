@@ -3,12 +3,9 @@ module github.com/sastromikus/pip_shortener
 go 1.24
 
 require (
-	github.com/go-chi/chi/v5 v5.2.5
-	github.com/sirupsen/logrus v1.9.4
+	github.com/go-chi/chi/v5 v5.2.2
+	github.com/lib/pq v1.10.9
+	github.com/sirupsen/logrus v1.9.3
 )
 
-require (
-	github.com/lib/pq v1.12.3 // indirect
-	github.com/stretchr/testify v1.11.1 // indirect
-	golang.org/x/sys v0.13.0 // indirect
-)
+require golang.org/x/sys v0.0.0-20220715151400-c0bba94af5f8 // indirect
