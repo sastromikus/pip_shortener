@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/sastromikus/pip_shortener/internal/handler/middleware"
 	"github.com/sastromikus/pip_shortener/internal/service"
 )
 
@@ -57,7 +58,9 @@ func handleAPIPostShortenBatchJSON(svc *service.Shortener, baseURL string, logge
 		})
 	}
 
-	results, err := svc.ShortenBatch(items)
+	userID, _ := middleware.UserIDFromContext(r.Context())
+
+	results, err := svc.ShortenBatchForUser(items, userID)
 	if err != nil {
 		writeShortenError(logger, w, err)
 		return

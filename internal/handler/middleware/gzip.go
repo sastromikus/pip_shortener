@@ -60,7 +60,7 @@ func (w *gzipResponseWriter) Close() error {
 func shouldCompressContentType(ct string) bool {
 	ct = strings.ToLower(ct)
 
-	return strings.HasPrefix(ct, "application/json") || strings.HasPrefix(ct, "text/html")
+	return strings.HasPrefix(ct, "application/json") || strings.HasPrefix(ct, "text/html") || strings.HasPrefix(ct, "text/plain")
 }
 
 func Gzip() func(http.Handler) http.Handler {

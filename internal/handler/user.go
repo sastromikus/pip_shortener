@@ -1,17 +1,14 @@
 package handler
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
+	"github.com/sastromikus/pip_shortener/internal/handler/middleware"
 	"github.com/sastromikus/pip_shortener/internal/service"
 )
-
-const userCookieName = "user_id"
 
 type userURLResponse struct {
 	ShortURL    string `json:"short_url"`
@@ -19,9 +16,14 @@ type userURLResponse struct {
 }
 
 func handleUserURLs(svc *service.Shortener, baseURL string, logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
-	userID, err := getOrCreateUserID(w, r)
-	if err != nil {
-		internalServerError(logger, w, "create user id", err)
+	if middleware.BadCookieNoID(r.Context()) {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	userID, ok := middleware.UserIDFromContext(r.Context())
+	if !ok || strings.TrimSpace(userID) == "" {
+		w.WriteHeader(http.StatusUnauthorized)
 		return
 	}
 
@@ -52,33 +54,4 @@ func handleUserURLs(svc *service.Shortener, baseURL string, logger *slog.Logger,
 		internalServerError(logger, w, "encode user urls response", err)
 		return
 	}
-}
-
-func getOrCreateUserID(w http.ResponseWriter, r *http.Request) (string, error) {
-	if c, err := r.Cookie(userCookieName); err == nil && c.Value != "" {
-		return c.Value, nil
-	}
-
-	userID, err := randomUserID()
-	if err != nil {
-		return "", err
-	}
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     userCookieName,
-		Value:    userID,
-		Path:     "/",
-		HttpOnly: true,
-	})
-
-	return userID, nil
-}
-
-func randomUserID() (string, error) {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("failed to generate a random user ID: %w", err)
-	}
-
-	return hex.EncodeToString(b), nil
 }

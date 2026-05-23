@@ -55,9 +55,6 @@ func Parse() Config {
 	if flagDSN != "" {
 		cfg.DatabaseDSN = flagDSN
 	}
-	if v := os.Getenv("DATABASE_DSN"); v != "" {
-	    cfg.DatabaseDSN = v
-	}
 
 	if v, ok := os.LookupEnv(envServerAddr); ok && v != "" {
 		cfg.ServerAddr = v

@@ -24,12 +24,26 @@ func (r *PostgresRepository) Get(id string) (string, bool) {
 		`SELECT original_url FROM urls WHERE short_id = $1`,
 		id,
 	).Scan(&original)
-
 	if err != nil {
 		return "", false
 	}
 
 	return original, true
+}
+
+func (r *PostgresRepository) GetWithDeleted(id string) (string, bool, bool) {
+	var original string
+	var deleted bool
+
+	err := r.db.QueryRowContext(context.TODO(),
+		`SELECT original_url, is_deleted FROM urls WHERE short_id = $1`,
+		id,
+	).Scan(&original, &deleted)
+	if err != nil {
+		return "", false, false
+	}
+
+	return original, true, deleted
 }
 
 func (r *PostgresRepository) GetByOriginal(original string) (string, bool) {
@@ -39,7 +53,6 @@ func (r *PostgresRepository) GetByOriginal(original string) (string, bool) {
 		`SELECT short_id FROM urls WHERE original_url = $1`,
 		original,
 	).Scan(&shortID)
-
 	if err != nil {
 		return "", false
 	}
@@ -112,7 +125,7 @@ func (r *PostgresRepository) ListUserURLs(userID string) ([]model.URLMapping, er
 		   FROM user_urls uu
 		   JOIN urls u ON u.short_id = uu.short_id
 		  WHERE uu.user_id = $1
-		  ORDER BY u.id`,
+		  ORDER BY u.short_id`,
 		userID,
 	)
 	if err != nil {
@@ -140,37 +153,35 @@ func (r *PostgresRepository) ListUserURLs(userID string) ([]model.URLMapping, er
 	return out, nil
 }
 
-func (r *PostgresRepository) GetWithDeleted(id string) (string, bool, bool) {
-	var original string
-	var deleted bool
-
-	err := r.db.QueryRowContext(context.TODO(),
-		`SELECT original_url, is_deleted FROM urls WHERE short_id = $1`,
-		id,
-	).Scan(&original, &deleted)
-	if err != nil {
-		return "", false, false
-	}
-
-	return original, true, deleted
-}
-
 func (r *PostgresRepository) MarkDeleted(userID string, ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}
 
-	_, err := r.db.ExecContext(context.TODO(),
-		`UPDATE urls u
-		    SET is_deleted = TRUE
-		   FROM user_urls uu
-		  WHERE uu.short_id = u.short_id
-		    AND uu.user_id = $1
-		    AND u.short_id = ANY($2)`,
-		userID,
-		ids,
-	)
+	var b strings.Builder
+	args := make([]any, 0, len(ids)+1)
 
+	b.WriteString(`UPDATE urls u
+	   SET is_deleted = TRUE
+	  FROM user_urls uu
+	 WHERE uu.short_id = u.short_id
+	   AND uu.user_id = $1
+	   AND u.short_id IN (`)
+
+	args = append(args, userID)
+	for i, id := range ids {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+
+		argPos := i + 2
+		b.WriteString(fmt.Sprintf("$%d", argPos))
+		args = append(args, id)
+	}
+
+	b.WriteString(`)`)
+
+	_, err := r.db.ExecContext(context.TODO(), b.String(), args...)
 	return err
 }
 

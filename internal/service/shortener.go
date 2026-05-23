@@ -117,6 +117,10 @@ func (s *Shortener) ShortenWithExistingForUser(raw string, userID string) (strin
 }
 
 func (s *Shortener) ShortenBatch(items []BatchItem) ([]BatchResult, error) {
+	return s.ShortenBatchForUser(items, "")
+}
+
+func (s *Shortener) ShortenBatchForUser(items []BatchItem, userID string) ([]BatchResult, error) {
 	results := make([]BatchResult, 0, len(items))
 	normalizedByIndex := make([]string, 0, len(items))
 	idByOriginal := make(map[string]string, len(items))
@@ -159,29 +163,36 @@ func (s *Shortener) ShortenBatch(items []BatchItem) ([]BatchResult, error) {
 		})
 	}
 
-	if len(toCreate) == 0 {
-		return results, nil
-	}
-
-	if err := s.repo.PutBatchIfAbsent(toCreate); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrStorage, err)
-	}
-
-	for _, item := range toCreate {
-		if storedOriginal, ok := s.repo.Get(item.ID); ok && storedOriginal == item.Original {
-			continue
+	if len(toCreate) > 0 {
+		if err := s.repo.PutBatchIfAbsent(toCreate); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrStorage, err)
 		}
 
-		existingID, ok := s.repo.GetByOriginal(item.Original)
-		if !ok {
-			return nil, ErrStorage
-		}
+		for _, item := range toCreate {
+			if storedOriginal, ok := s.repo.Get(item.ID); ok && storedOriginal == item.Original {
+				continue
+			}
 
-		idByOriginal[item.Original] = existingID
+			existingID, ok := s.repo.GetByOriginal(item.Original)
+			if !ok {
+				return nil, ErrStorage
+			}
+
+			idByOriginal[item.Original] = existingID
+		}
 	}
 
 	for i, normalized := range normalizedByIndex {
 		results[i].ID = idByOriginal[normalized]
+	}
+
+	userID = strings.TrimSpace(userID)
+	if userID != "" {
+		for _, result := range results {
+			if err := s.repo.AddUserURL(userID, result.ID); err != nil {
+				return nil, fmt.Errorf("%w: %v", ErrStorage, err)
+			}
+		}
 	}
 
 	return results, nil
@@ -211,6 +222,107 @@ func (s *Shortener) UserURLs(userID string) []UserURL {
 
 func (s *Shortener) Resolve(id string) (string, bool) {
 	return s.repo.Get(id)
+}
+
+func (s *Shortener) ResolveWithDeleted(id string) (string, bool, bool) {
+	return s.repo.GetWithDeleted(id)
+}
+
+func (s *Shortener) EnqueueDelete(userID string, ids []string) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" || len(ids) == 0 {
+		return
+	}
+
+	cleanIDs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			cleanIDs = append(cleanIDs, id)
+		}
+	}
+
+	if len(cleanIDs) == 0 {
+		return
+	}
+
+	select {
+	case s.deleteCh <- DeleteTask{UserID: userID, IDs: cleanIDs}:
+	default:
+	}
+}
+
+func (s *Shortener) StartDeleteWorker(batchSize int, flushEvery time.Duration) {
+	if batchSize <= 0 {
+		batchSize = 64
+	}
+	if flushEvery <= 0 {
+		flushEvery = 500 * time.Millisecond
+	}
+
+	go func() {
+		pending := make(map[string]map[string]struct{})
+
+		flush := func() {
+			for userID, set := range pending {
+				if len(set) == 0 {
+					continue
+				}
+
+				ids := make([]string, 0, len(set))
+				for id := range set {
+					ids = append(ids, id)
+				}
+
+				_ = s.repo.MarkDeleted(userID, ids)
+				delete(pending, userID)
+			}
+		}
+
+		ticker := time.NewTicker(flushEvery)
+		defer ticker.Stop()
+
+		count := 0
+		for {
+			select {
+			case task, ok := <-s.deleteCh:
+				if !ok {
+					flush()
+					return
+				}
+
+				if task.UserID == "" || len(task.IDs) == 0 {
+					continue
+				}
+
+				set := pending[task.UserID]
+				if set == nil {
+					set = make(map[string]struct{})
+					pending[task.UserID] = set
+				}
+
+				for _, id := range task.IDs {
+					id = strings.TrimSpace(id)
+					if id == "" {
+						continue
+					}
+					set[id] = struct{}{}
+					count++
+				}
+
+				if count >= batchSize {
+					flush()
+					count = 0
+				}
+
+			case <-ticker.C:
+				if count > 0 {
+					flush()
+					count = 0
+				}
+			}
+		}
+	}()
 }
 
 func (s *Shortener) generateBatchID(used map[string]struct{}, length int, tries int) (string, error) {
@@ -321,105 +433,4 @@ func validateURL(raw string) error {
 	}
 
 	return nil
-}
-
-func (s *Shortener) EnqueueDelete(userID string, ids []string) {
-	userID = strings.TrimSpace(userID)
-	if userID == "" || len(ids) == 0 {
-		return
-	}
-
-	cleanIDs := make([]string, 0, len(ids))
-	for _, id := range ids {
-		id = strings.TrimSpace(id)
-		if id != "" {
-			cleanIDs = append(cleanIDs, id)
-		}
-	}
-
-	if len(cleanIDs) == 0 {
-		return
-	}
-
-	select {
-	case s.deleteCh <- DeleteTask{UserID: userID, IDs: cleanIDs}:
-	default:
-	}
-}
-
-func (s *Shortener) StartDeleteWorker(batchSize int, flushEvery time.Duration) {
-	if batchSize <= 0 {
-		batchSize = 64
-	}
-	if flushEvery <= 0 {
-		flushEvery = 500 * time.Millisecond
-	}
-
-	go func() {
-		pending := make(map[string]map[string]struct{})
-
-		flush := func() {
-			for userID, set := range pending {
-				if len(set) == 0 {
-					continue
-				}
-
-				ids := make([]string, 0, len(set))
-				for id := range set {
-					ids = append(ids, id)
-				}
-
-				_ = s.repo.MarkDeleted(userID, ids)
-				delete(pending, userID)
-			}
-		}
-
-		ticker := time.NewTicker(flushEvery)
-		defer ticker.Stop()
-
-		count := 0
-		for {
-			select {
-			case task, ok := <-s.deleteCh:
-				if !ok {
-					flush()
-					return
-				}
-
-				if task.UserID == "" || len(task.IDs) == 0 {
-					continue
-				}
-
-				set := pending[task.UserID]
-				if set == nil {
-					set = make(map[string]struct{})
-					pending[task.UserID] = set
-				}
-
-				for _, id := range task.IDs {
-					id = strings.TrimSpace(id)
-					if id == "" {
-						continue
-					}
-					set[id] = struct{}{}
-					count++
-				}
-
-				if count >= batchSize {
-					flush()
-					count = 0
-				}
-
-			case <-ticker.C:
-				if count > 0 {
-					flush()
-					count = 0
-				}
-			}
-		}
-	}()
-}
-
-func (s *Shortener) ResolveWithDeleted(id string) (string, bool, bool) {
-	return s.repo.GetWithDeleted(id)
 }

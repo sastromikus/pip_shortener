@@ -12,11 +12,11 @@ import (
 )
 
 type FileRepository struct {
-	mu        sync.Mutex
-	path      string
-	usersPath string
-	mem       *MemoryRepository
-	user      map[string]map[string]struct{}
+	mu          sync.Mutex
+	path        string
+	usersPath   string
+	deletedPath string
+	mem         *MemoryRepository
 }
 
 type fileRecord struct {
@@ -31,10 +31,10 @@ func NewFileRepository(path string) (*FileRepository, error) {
 	}
 
 	r := &FileRepository{
-		path:      path,
-		usersPath: path + ".users",
-		mem:       NewMemoryRepository(),
-		user:      make(map[string]map[string]struct{}),
+		path:        path,
+		usersPath:   path + ".users",
+		deletedPath: path + ".deleted",
+		mem:         NewMemoryRepository(),
 	}
 
 	if err := r.load(); err != nil {
@@ -45,11 +45,19 @@ func NewFileRepository(path string) (*FileRepository, error) {
 		return nil, err
 	}
 
+	if err := r.loadDeleted(); err != nil {
+		return nil, err
+	}
+
 	return r, nil
 }
 
 func (r *FileRepository) Get(id string) (string, bool) {
 	return r.mem.Get(id)
+}
+
+func (r *FileRepository) GetWithDeleted(id string) (string, bool, bool) {
+	return r.mem.GetWithDeleted(id)
 }
 
 func (r *FileRepository) GetByOriginal(original string) (string, bool) {
@@ -106,39 +114,26 @@ func (r *FileRepository) AddUserURL(userID, shortID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	set, ok := r.user[userID]
-	if !ok {
-		set = make(map[string]struct{})
-		r.user[userID] = set
+	if err := r.mem.AddUserURL(userID, shortID); err != nil {
+		return err
 	}
 
-	set[shortID] = struct{}{}
 	return r.saveUsersLocked()
 }
 
 func (r *FileRepository) ListUserURLs(userID string) ([]model.URLMapping, error) {
+	return r.mem.ListUserURLs(userID)
+}
+
+func (r *FileRepository) MarkDeleted(userID string, ids []string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	set := r.user[userID]
-	if len(set) == 0 {
-		return nil, nil
+	if err := r.mem.MarkDeleted(userID, ids); err != nil {
+		return err
 	}
 
-	out := make([]model.URLMapping, 0, len(set))
-	for id := range set {
-		orig, ok := r.mem.Get(id)
-		if !ok {
-			continue
-		}
-
-		out = append(out, model.URLMapping{
-			ID:       id,
-			Original: orig,
-		})
-	}
-
-	return out, nil
+	return r.saveDeletedLocked()
 }
 
 func (r *FileRepository) load() error {
@@ -213,22 +208,15 @@ func (r *FileRepository) loadUsers() error {
 		return nil
 	}
 
-	var m map[string][]string
-	if err := json.Unmarshal(b, &m); err != nil {
+	var users map[string][]string
+	if err := json.Unmarshal(b, &users); err != nil {
 		return err
 	}
 
-	for userID, ids := range m {
-		set := make(map[string]struct{})
+	for userID, ids := range users {
 		for _, id := range ids {
-			if id == "" {
-				continue
-			}
-
-			set[id] = struct{}{}
+			_ = r.mem.AddUserURL(userID, id)
 		}
-
-		r.user[userID] = set
 	}
 
 	return nil
@@ -242,16 +230,7 @@ func (r *FileRepository) saveUsersLocked() error {
 		}
 	}
 
-	m := make(map[string][]string, len(r.user))
-	for userID, set := range r.user {
-		ids := make([]string, 0, len(set))
-		for id := range set {
-			ids = append(ids, id)
-		}
-		m[userID] = ids
-	}
-
-	b, err := json.MarshalIndent(m, "", "  ")
+	b, err := json.MarshalIndent(r.mem.UserItems(), "", "  ")
 	if err != nil {
 		return err
 	}
@@ -262,4 +241,52 @@ func (r *FileRepository) saveUsersLocked() error {
 	}
 
 	return os.Rename(tmp, r.usersPath)
+}
+
+func (r *FileRepository) loadDeleted() error {
+	b, err := os.ReadFile(r.deletedPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	if len(b) == 0 {
+		return nil
+	}
+
+	var deleted map[string]bool
+	if err := json.Unmarshal(b, &deleted); err != nil {
+		return err
+	}
+
+	for id, ok := range deleted {
+		if ok {
+			r.mem.setDeleted(id, true)
+		}
+	}
+
+	return nil
+}
+
+func (r *FileRepository) saveDeletedLocked() error {
+	dir := filepath.Dir(r.deletedPath)
+	if dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+
+	b, err := json.MarshalIndent(r.mem.DeletedItems(), "", "  ")
+	if err != nil {
+		return err
+	}
+
+	tmp := r.deletedPath + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+
+	return os.Rename(tmp, r.deletedPath)
 }
