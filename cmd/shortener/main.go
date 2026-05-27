@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/sirupsen/logrus"
 
 	"github.com/sastromikus/pip_shortener/internal/config"
 	"github.com/sastromikus/pip_shortener/internal/handler"
@@ -24,9 +27,16 @@ func main() {
 func run() error {
 	cfg := config.Parse()
 
-	repo := repository.NewMemoryRepository()
+	logger := logrus.New()
+	logger.SetLevel(logrus.InfoLevel)
+
+	repo, err := repository.NewFileRepository(cfg.FileStoragePath)
+	if err != nil {
+		return fmt.Errorf("file repository: %w", err)
+	}
+
 	svc := service.NewShortener(repo)
-	router := handler.NewRouter(svc, cfg.BaseURL)
+	router := handler.NewRouter(svc, cfg.BaseURL, logger)
 
 	srv := &http.Server{
 		Addr:    cfg.ServerAddr,
@@ -34,7 +44,6 @@ func run() error {
 	}
 
 	serverErr := make(chan error, 1)
-
 	go func() {
 		log.Printf("listening on http://%s\n", cfg.ServerAddr)
 
@@ -42,7 +51,6 @@ func run() error {
 			serverErr <- err
 			return
 		}
-
 		serverErr <- nil
 	}()
 
