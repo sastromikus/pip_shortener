@@ -3,11 +3,8 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
-
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/sastromikus/pip_shortener/internal/model"
 )
@@ -168,6 +165,7 @@ func (r *PostgresRepository) ListUserURLs(userID string) ([]model.UserURL, error
 		   FROM user_urls uu
 		   JOIN urls u ON u.short_id = uu.short_id
 		  WHERE uu.user_id = $1
+		    AND u.is_deleted = FALSE
 		  ORDER BY u.id`,
 		userID,
 	)
@@ -219,13 +217,4 @@ func (r *PostgresRepository) MarkDeleted(userID string, ids []string) error {
 
 	_, err := r.db.ExecContext(context.TODO(), b.String(), args...)
 	return err
-}
-
-func IsUniqueViolationOn(err error, constraint string) bool {
-	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) {
-		return false
-	}
-
-	return pgErr.Code == "23505" && pgErr.ConstraintName == constraint
 }

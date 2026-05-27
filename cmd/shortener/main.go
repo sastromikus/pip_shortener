@@ -59,7 +59,9 @@ func run() error {
 	}
 
 	svc := service.NewShortener(repo)
-	svc.StartDeleteWorker(128, 500*time.Millisecond, func(err error) {
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	defer workerCancel()
+	svc.StartDeleteWorker(workerCtx, 128, 500*time.Millisecond, func(err error) {
 		logger.Error("delete worker failed", "error", err)
 	})
 
@@ -87,6 +89,8 @@ func run() error {
 	case err := <-serverErr:
 		return err
 	}
+
+	workerCancel()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

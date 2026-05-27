@@ -283,5 +283,12 @@ func writeJSONAtomic(path string, v any) error {
 		return err
 	}
 
+	if err := os.Rename(tmp, path); err == nil {
+		return nil
+	}
+
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
 	return os.Rename(tmp, path)
 }

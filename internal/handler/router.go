@@ -56,7 +56,7 @@ func NewRouter(svc *service.Shortener, baseURL string, logger *slog.Logger, db *
 func handleShorten(svc *service.Shortener, baseURL string, logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
 	ct := strings.ToLower(r.Header.Get("Content-Type"))
 	ce := strings.ToLower(r.Header.Get("Content-Encoding"))
-	if ct == "" || !(strings.HasPrefix(ct, "text/plain") || (strings.Contains(ce, "gzip") && strings.HasPrefix(ct, "application/x-gzip"))) {
+	if ct != "" && !(strings.HasPrefix(ct, "text/plain") || (strings.Contains(ce, "gzip") && strings.HasPrefix(ct, "application/x-gzip"))) {
 		writeStatus(w, http.StatusBadRequest)
 		return
 	}
@@ -133,8 +133,7 @@ func joinURL(baseURL string, id string) string {
 func statusFromServiceError(err error) int {
 	if errors.Is(err, service.ErrEmptyURL) ||
 		errors.Is(err, service.ErrUnsupportedScheme) ||
-		errors.Is(err, service.ErrEmptyHost) ||
-		errors.Is(err, service.ErrGenerateID) {
+		errors.Is(err, service.ErrEmptyHost) {
 		return http.StatusBadRequest
 	}
 

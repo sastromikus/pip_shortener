@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
@@ -139,7 +140,7 @@ func (s *Shortener) ShortenBatch(items []BatchItem, userID string) ([]BatchResul
 
 	if len(toCreate) > 0 {
 		if err := s.repo.PutBatchIfAbsent(toCreate); err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrStorage, err)
+			return nil, fmt.Errorf("%w: %w", ErrStorage, err)
 		}
 	}
 
@@ -220,7 +221,7 @@ func (s *Shortener) EnqueueDelete(userID string, ids []string) {
 	}
 }
 
-func (s *Shortener) StartDeleteWorker(batchSize int, flushEvery time.Duration, logError func(error)) {
+func (s *Shortener) StartDeleteWorker(ctx context.Context, batchSize int, flushEvery time.Duration, logError func(error)) {
 	deleter, ok := s.repo.(DeletedURLRepository)
 	if !ok {
 		return
@@ -260,6 +261,10 @@ func (s *Shortener) StartDeleteWorker(batchSize int, flushEvery time.Duration, l
 		count := 0
 		for {
 			select {
+			case <-ctx.Done():
+				flush()
+				return
+
 			case task, ok := <-s.deleteCh:
 				if !ok {
 					flush()
@@ -317,13 +322,13 @@ func (s *Shortener) addUserURLs(userID string, shortIDs []string) error {
 
 	if len(shortIDs) == 1 {
 		if err := store.AddUserURL(userID, shortIDs[0]); err != nil {
-			return fmt.Errorf("%w: %v", ErrStorage, err)
+			return fmt.Errorf("%w: %w", ErrStorage, err)
 		}
 		return nil
 	}
 
 	if err := store.AddUserURLs(userID, shortIDs); err != nil {
-		return fmt.Errorf("%w: %v", ErrStorage, err)
+		return fmt.Errorf("%w: %w", ErrStorage, err)
 	}
 	return nil
 }
@@ -332,7 +337,7 @@ func (s *Shortener) shortenWithUniqueID(raw string, length int, tries int) (stri
 	for i := 0; i < tries; i++ {
 		id, err := randomstringbase(length)
 		if err != nil {
-			return "", false, fmt.Errorf("%w: %v", ErrGenerateID, err)
+			return "", false, fmt.Errorf("%w: %w", ErrGenerateID, err)
 		}
 
 		created, err := s.repo.PutIfAbsent(id, raw)
@@ -340,7 +345,7 @@ func (s *Shortener) shortenWithUniqueID(raw string, length int, tries int) (stri
 			if existingID, ok := s.repo.GetByOriginal(raw); ok {
 				return existingID, true, nil
 			}
-			return "", false, fmt.Errorf("%w: %v", ErrStorage, err)
+			return "", false, fmt.Errorf("%w: %w", ErrStorage, err)
 		}
 
 		if created {
@@ -359,7 +364,7 @@ func (s *Shortener) generateBatchID(used map[string]struct{}, length int, tries 
 	for i := 0; i < tries; i++ {
 		id, err := randomstringbase(length)
 		if err != nil {
-			return "", fmt.Errorf("%w: %v", ErrGenerateID, err)
+			return "", fmt.Errorf("%w: %w", ErrGenerateID, err)
 		}
 
 		if _, ok := used[id]; ok {

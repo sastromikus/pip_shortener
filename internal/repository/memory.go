@@ -206,7 +206,7 @@ func (r *MemoryRepository) ListUserURLs(userID string) ([]model.UserURL, error) 
 	out := make([]model.UserURL, 0, len(ids))
 	for _, id := range ids {
 		original, ok := r.data[id]
-		if !ok {
+		if !ok || r.deleted[id] {
 			continue
 		}
 		out = append(out, model.UserURL{ShortID: id, Original: original})
