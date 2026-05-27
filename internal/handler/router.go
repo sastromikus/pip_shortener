@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -86,6 +87,41 @@ func handleShorten(svc *service.Shortener, baseURL string, w http.ResponseWriter
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
 	_, _ = w.Write([]byte(shortURL))
+}
+
+func handleShortenJSON(svc *service.Shortener, baseURL string, w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
+	var req shortenJSONRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		badRequest(w)
+		return
+	}
+
+	raw := strings.TrimSpace(req.URL)
+	if raw == "" {
+		badRequest(w)
+		return
+	}
+
+	id, err := svc.Shorten(raw)
+	if err != nil {
+		writeShortenError(w, err)
+		return
+	}
+
+	shortURL, err := buildShortURL(baseURL, id)
+	if err != nil {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+
+	_ = json.NewEncoder(w).Encode(shortenJSONResponse{
+		Result: shortURL,
+	})
 }
 
 func handleRedirect(svc *service.Shortener, id string, w http.ResponseWriter, r *http.Request) {

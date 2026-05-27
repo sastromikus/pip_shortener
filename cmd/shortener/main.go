@@ -46,6 +46,7 @@ func run() error {
 	serverErr := make(chan error, 1)
 	go func() {
 		log.Printf("listening on http://%s\n", cfg.ServerAddr)
+
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			serverErr <- err
 			return
