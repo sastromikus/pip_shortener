@@ -4,6 +4,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net/http"
 
 	"github.com/sastromikus/pip_shortener/internal/service"
@@ -16,10 +18,10 @@ type userURLResponse struct {
 	OriginalURL string `json:"original_url"`
 }
 
-func handleUserURLs(svc *service.Shortener, baseURL string, w http.ResponseWriter, r *http.Request) {
+func handleUserURLs(svc *service.Shortener, baseURL string, logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
 	userID, err := getOrCreateUserID(w, r)
 	if err != nil {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		internalServerError(logger, w, "create user id", err)
 		return
 	}
 
@@ -33,7 +35,7 @@ func handleUserURLs(svc *service.Shortener, baseURL string, w http.ResponseWrite
 	for _, item := range items {
 		shortURL, err := buildShortURL(baseURL, item.ID)
 		if err != nil {
-			http.Error(w, "internal server error", http.StatusInternalServerError)
+			internalServerError(logger, w, "build user short url", err)
 			return
 		}
 
@@ -45,7 +47,11 @@ func handleUserURLs(svc *service.Shortener, baseURL string, w http.ResponseWrite
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(resp)
+
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		internalServerError(logger, w, "encode user urls response", err)
+		return
+	}
 }
 
 func getOrCreateUserID(w http.ResponseWriter, r *http.Request) (string, error) {
@@ -71,7 +77,7 @@ func getOrCreateUserID(w http.ResponseWriter, r *http.Request) (string, error) {
 func randomUserID() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to generate a random user ID: %w", err)
 	}
 
 	return hex.EncodeToString(b), nil

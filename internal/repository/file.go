@@ -6,14 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"sync"
+
+	"github.com/sastromikus/pip_shortener/internal/model"
 )
 
 type FileRepository struct {
-	mu      sync.Mutex
-	path    string
-	data    map[string]string
-	uuidSeq int
+	path string
+	mem  *MemoryRepository
 }
 
 type fileRecord struct {
@@ -29,7 +28,7 @@ func NewFileRepository(path string) (*FileRepository, error) {
 
 	r := &FileRepository{
 		path: path,
-		data: make(map[string]string),
+		mem:  NewMemoryRepository(),
 	}
 
 	if err := r.load(); err != nil {
@@ -40,34 +39,60 @@ func NewFileRepository(path string) (*FileRepository, error) {
 }
 
 func (r *FileRepository) Get(id string) (string, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	return r.mem.Get(id)
+}
 
-	v, ok := r.data[id]
-	return v, ok
+func (r *FileRepository) GetByOriginal(original string) (string, bool) {
+	return r.mem.GetByOriginal(original)
 }
 
 func (r *FileRepository) PutIfAbsent(id string, original string) (bool, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	created, err := r.mem.PutIfAbsent(id, original)
+	if err != nil {
+		return false, err
+	}
 
-	if _, ok := r.data[id]; ok {
+	if !created {
 		return false, nil
 	}
 
-	r.data[id] = original
-	if err := r.saveLocked(); err != nil {
-		delete(r.data, id)
+	if err := r.save(); err != nil {
+		r.mem.Delete(id)
 		return false, err
 	}
 
 	return true, nil
 }
 
-func (r *FileRepository) load() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+func (r *FileRepository) PutBatchIfAbsent(items []model.URLItem) error {
+	createdIDs := make([]string, 0, len(items))
 
+	for _, item := range items {
+		created, err := r.mem.PutIfAbsent(item.ID, item.Original)
+		if err != nil {
+			return err
+		}
+
+		if created {
+			createdIDs = append(createdIDs, item.ID)
+		}
+	}
+
+	if len(createdIDs) == 0 {
+		return nil
+	}
+
+	if err := r.save(); err != nil {
+		for _, id := range createdIDs {
+			r.mem.Delete(id)
+		}
+		return err
+	}
+
+	return nil
+}
+
+func (r *FileRepository) load() error {
 	b, err := os.ReadFile(r.path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -85,19 +110,14 @@ func (r *FileRepository) load() error {
 		return err
 	}
 
-	maxUUID := 0
 	for _, rec := range recs {
-		r.data[rec.ShortURL] = rec.OriginalURL
-		if n, err := strconv.Atoi(rec.UUID); err == nil && n > maxUUID {
-			maxUUID = n
-		}
+		_, _ = r.mem.PutIfAbsent(rec.ShortURL, rec.OriginalURL)
 	}
-	r.uuidSeq = maxUUID
 
 	return nil
 }
 
-func (r *FileRepository) saveLocked() error {
+func (r *FileRepository) save() error {
 	dir := filepath.Dir(r.path)
 	if dir != "." && dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -105,9 +125,11 @@ func (r *FileRepository) saveLocked() error {
 		}
 	}
 
-	records := make([]fileRecord, 0, len(r.data))
+	items := r.mem.Items()
+	records := make([]fileRecord, 0, len(items))
+
 	i := 0
-	for id, original := range r.data {
+	for id, original := range items {
 		i++
 		records = append(records, fileRecord{
 			UUID:        strconv.Itoa(i),

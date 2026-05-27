@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -16,7 +17,7 @@ type apiShortenResponse struct {
 	Result string `json:"result"`
 }
 
-func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, w http.ResponseWriter, r *http.Request) {
+func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
 	ct := r.Header.Get("Content-Type")
 	if ct == "" || !strings.HasPrefix(strings.ToLower(ct), "application/json") {
 		badRequest(w)
@@ -43,23 +44,32 @@ func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, w http.Res
 
 	userID, err := getOrCreateUserID(w, r)
 	if err != nil {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		internalServerError(logger, w, "create user id", err)
 		return
 	}
 
-	id, err := svc.ShortenForUser(raw, userID)
+	id, existed, err := svc.ShortenWithExistingForUser(raw, userID)
 	if err != nil {
-		writeShortenError(w, err)
+		writeShortenError(logger, w, err)
 		return
 	}
 
 	shortURL, err := buildShortURL(baseURL, id)
 	if err != nil {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		internalServerError(logger, w, "build short url", err)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(apiShortenResponse{Result: shortURL})
+
+	if existed {
+		w.WriteHeader(http.StatusConflict)
+	} else {
+		w.WriteHeader(http.StatusCreated)
+	}
+
+	if err := json.NewEncoder(w).Encode(apiShortenResponse{Result: shortURL}); err != nil {
+		internalServerError(logger, w, "encode api shorten response", err)
+		return
+	}
 }

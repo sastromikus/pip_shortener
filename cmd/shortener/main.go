@@ -2,15 +2,16 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/sastromikus/pip_shortener/internal/config"
 	"github.com/sastromikus/pip_shortener/internal/handler"
@@ -20,23 +21,46 @@ import (
 
 func main() {
 	if err := run(); err != nil {
-		log.Fatal(err)
+		slog.Error("application failed", "error", err)
+		os.Exit(1)
 	}
 }
 
 func run() error {
 	cfg := config.Parse()
 
-	logger := logrus.New()
-	logger.SetLevel(logrus.InfoLevel)
+	logger := slog.Default()
 
-	repo, err := repository.NewFileRepository(cfg.FileStoragePath)
-	if err != nil {
-		return fmt.Errorf("file repository: %w", err)
+	var (
+		repo service.URLRepository
+		db   *sql.DB
+	)
+
+	if cfg.DatabaseDSN != "" {
+		dbCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		postgresDB, postgresRepo, err := repository.NewPostgresStorage(dbCtx, cfg.DatabaseDSN)
+		if err != nil {
+			return err
+		}
+
+		db = postgresDB
+		defer db.Close()
+
+		repo = postgresRepo
+	} else if cfg.FileStoragePath != "" {
+		fileRepo, err := repository.NewFileRepository(cfg.FileStoragePath)
+		if err != nil {
+			return fmt.Errorf("file repository: %w", err)
+		}
+		repo = fileRepo
+	} else {
+		repo = repository.NewMemoryRepository()
 	}
 
 	svc := service.NewShortener(repo)
-	router := handler.NewRouter(svc, cfg.BaseURL, logger)
+	router := handler.NewRouter(svc, cfg.BaseURL, logger, db)
 
 	srv := &http.Server{
 		Addr:    cfg.ServerAddr,
@@ -44,13 +68,15 @@ func run() error {
 	}
 
 	serverErr := make(chan error, 1)
+
 	go func() {
-		log.Printf("listening on http://%s\n", cfg.ServerAddr)
+		logger.Info("listening on", "addr", cfg.ServerAddr)
 
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			serverErr <- err
 			return
 		}
+
 		serverErr <- nil
 	}()
 
@@ -67,10 +93,10 @@ func run() error {
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("server shutdown error: %v", err)
+		logger.Error("server shutdown error", "error", err)
 		return err
 	}
 
-	log.Println("shutdown")
+	logger.Info("shutdown")
 	return nil
 }
