@@ -41,7 +41,7 @@ func NewRouter(svc *service.Shortener, baseURL string, logger *slog.Logger, db *
 		handleUserURLs(svc, baseURL, logger, w, r)
 	})
 	r.Delete("/api/user/urls", func(w http.ResponseWriter, r *http.Request) {
-		handleDeleteUserURLs(svc, w, r)
+		handleDeleteUserURLs(svc, logger, w, r)
 	})
 	r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
 		handlePing(db, w, r)
@@ -74,7 +74,7 @@ func handleShorten(svc *service.Shortener, baseURL string, logger *slog.Logger, 
 	}
 
 	userID, _ := middleware.UserIDFromContext(r.Context())
-	id, existed, err := svc.ShortenForUser(raw, userID)
+	id, existed, err := svc.ShortenForUserContext(r.Context(), raw, userID)
 	if err != nil {
 		status := statusFromServiceError(err)
 		if status == http.StatusInternalServerError {
@@ -101,7 +101,7 @@ func handleRedirect(svc *service.Shortener, id string, w http.ResponseWriter, r 
 		return
 	}
 
-	original, ok, deleted := svc.ResolveWithDeleted(id)
+	original, ok, deleted := svc.ResolveWithDeleted(r.Context(), id)
 	if !ok {
 		writeStatus(w, http.StatusBadRequest)
 		return

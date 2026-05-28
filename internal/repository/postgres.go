@@ -28,7 +28,7 @@ func NewPostgresStorage(ctx context.Context, dsn string) (*sql.DB, *PostgresRepo
 		return nil, nil, fmt.Errorf("ping postgres: %w", err)
 	}
 
-	if err := RunPostgresMigrations(db); err != nil {
+	if err := RunPostgresMigrations(ctx, db); err != nil {
 		_ = db.Close()
 		return nil, nil, fmt.Errorf("run postgres migrations: %w", err)
 	}
@@ -36,9 +36,9 @@ func NewPostgresStorage(ctx context.Context, dsn string) (*sql.DB, *PostgresRepo
 	return db, NewPostgresRepository(db), nil
 }
 
-func (r *PostgresRepository) Get(id string) (string, bool) {
+func (r *PostgresRepository) Get(ctx context.Context, id string) (string, bool) {
 	var original string
-	err := r.db.QueryRowContext(context.TODO(),
+	err := r.db.QueryRowContext(ctx,
 		`SELECT original_url FROM urls WHERE short_id = $1`,
 		id,
 	).Scan(&original)
@@ -49,11 +49,11 @@ func (r *PostgresRepository) Get(id string) (string, bool) {
 	return original, true
 }
 
-func (r *PostgresRepository) GetWithDeleted(id string) (string, bool, bool) {
+func (r *PostgresRepository) GetWithDeleted(ctx context.Context, id string) (string, bool, bool) {
 	var original string
 	var deleted bool
 
-	err := r.db.QueryRowContext(context.TODO(),
+	err := r.db.QueryRowContext(ctx,
 		`SELECT original_url, is_deleted FROM urls WHERE short_id = $1`,
 		id,
 	).Scan(&original, &deleted)
@@ -64,9 +64,9 @@ func (r *PostgresRepository) GetWithDeleted(id string) (string, bool, bool) {
 	return original, true, deleted
 }
 
-func (r *PostgresRepository) GetByOriginal(original string) (string, bool) {
+func (r *PostgresRepository) GetByOriginal(ctx context.Context, original string) (string, bool) {
 	var shortID string
-	err := r.db.QueryRowContext(context.TODO(),
+	err := r.db.QueryRowContext(ctx,
 		`SELECT short_id FROM urls WHERE original_url = $1`,
 		original,
 	).Scan(&shortID)
@@ -77,8 +77,8 @@ func (r *PostgresRepository) GetByOriginal(original string) (string, bool) {
 	return shortID, true
 }
 
-func (r *PostgresRepository) PutIfAbsent(id string, original string) (bool, error) {
-	res, err := r.db.ExecContext(context.TODO(),
+func (r *PostgresRepository) PutIfAbsent(ctx context.Context, id string, original string) (bool, error) {
+	res, err := r.db.ExecContext(ctx,
 		`INSERT INTO urls (short_id, original_url)
 		 VALUES ($1, $2)
 		 ON CONFLICT DO NOTHING`,
@@ -97,7 +97,7 @@ func (r *PostgresRepository) PutIfAbsent(id string, original string) (bool, erro
 	return rows > 0, nil
 }
 
-func (r *PostgresRepository) PutBatchIfAbsent(items []model.URLItem) error {
+func (r *PostgresRepository) PutBatchIfAbsent(ctx context.Context, items []model.URLItem) error {
 	if len(items) == 0 {
 		return nil
 	}
@@ -117,25 +117,25 @@ func (r *PostgresRepository) PutBatchIfAbsent(items []model.URLItem) error {
 	}
 	b.WriteString(` ON CONFLICT DO NOTHING`)
 
-	_, err := r.db.ExecContext(context.TODO(), b.String(), args...)
+	_, err := r.db.ExecContext(ctx, b.String(), args...)
 	return err
 }
 
 // Put is kept for tests and simple compatibility. Business code should prefer PutIfAbsent.
 func (r *PostgresRepository) Put(id string, original string) {
-	_, _ = r.PutIfAbsent(id, original)
+	_, _ = r.PutIfAbsent(context.Background(), id, original)
 }
 
 func (r *PostgresRepository) Exists(id string) bool {
-	_, ok := r.Get(id)
+	_, ok := r.Get(context.Background(), id)
 	return ok
 }
 
-func (r *PostgresRepository) AddUserURL(userID, shortID string) error {
-	return r.AddUserURLs(userID, []string{shortID})
+func (r *PostgresRepository) AddUserURL(ctx context.Context, userID, shortID string) error {
+	return r.AddUserURLs(ctx, userID, []string{shortID})
 }
 
-func (r *PostgresRepository) AddUserURLs(userID string, shortIDs []string) error {
+func (r *PostgresRepository) AddUserURLs(ctx context.Context, userID string, shortIDs []string) error {
 	if userID == "" || len(shortIDs) == 0 {
 		return nil
 	}
@@ -155,12 +155,12 @@ func (r *PostgresRepository) AddUserURLs(userID string, shortIDs []string) error
 	}
 	b.WriteString(` ON CONFLICT (user_id, short_id) DO NOTHING`)
 
-	_, err := r.db.ExecContext(context.TODO(), b.String(), args...)
+	_, err := r.db.ExecContext(ctx, b.String(), args...)
 	return err
 }
 
-func (r *PostgresRepository) ListUserURLs(userID string) ([]model.UserURL, error) {
-	rows, err := r.db.QueryContext(context.TODO(),
+func (r *PostgresRepository) ListUserURLs(ctx context.Context, userID string) ([]model.UserURL, error) {
+	rows, err := r.db.QueryContext(ctx,
 		`SELECT u.short_id, u.original_url
 		   FROM user_urls uu
 		   JOIN urls u ON u.short_id = uu.short_id
@@ -189,7 +189,7 @@ func (r *PostgresRepository) ListUserURLs(userID string) ([]model.UserURL, error
 	return out, nil
 }
 
-func (r *PostgresRepository) MarkDeleted(userID string, ids []string) error {
+func (r *PostgresRepository) MarkDeleted(ctx context.Context, userID string, ids []string) error {
 	if userID == "" || len(ids) == 0 {
 		return nil
 	}
@@ -215,6 +215,6 @@ func (r *PostgresRepository) MarkDeleted(userID string, ids []string) error {
 	}
 	b.WriteString(`)`)
 
-	_, err := r.db.ExecContext(context.TODO(), b.String(), args...)
+	_, err := r.db.ExecContext(ctx, b.String(), args...)
 	return err
 }

@@ -55,7 +55,7 @@ func handleAPIPostShortenBatchJSON(svc *service.Shortener, baseURL string, logge
 	}
 
 	userID, _ := middleware.UserIDFromContext(r.Context())
-	results, err := svc.ShortenBatch(items, userID)
+	results, err := svc.ShortenBatchContext(r.Context(), items, userID)
 	if err != nil {
 		status := statusFromServiceError(err)
 		if status == http.StatusInternalServerError {

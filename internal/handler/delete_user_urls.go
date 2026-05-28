@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -9,7 +10,7 @@ import (
 	"github.com/sastromikus/pip_shortener/internal/service"
 )
 
-func handleDeleteUserURLs(svc *service.Shortener, w http.ResponseWriter, r *http.Request) {
+func handleDeleteUserURLs(svc *service.Shortener, logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
 	if middleware.BadCookieNoID(r.Context()) {
 		writeStatus(w, http.StatusUnauthorized)
 		return
@@ -43,6 +44,9 @@ func handleDeleteUserURLs(svc *service.Shortener, w http.ResponseWriter, r *http
 		return
 	}
 
-	svc.EnqueueDelete(userID, ids)
+	if err := svc.EnqueueDelete(userID, ids); err != nil {
+		internalServerError(logger, w, "enqueue delete", err)
+		return
+	}
 	w.WriteHeader(http.StatusAccepted)
 }

@@ -38,7 +38,7 @@ func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, logger *sl
 	}
 
 	userID, _ := middleware.UserIDFromContext(r.Context())
-	id, existed, err := svc.ShortenForUser(req.URL, userID)
+	id, existed, err := svc.ShortenForUserContext(r.Context(), req.URL, userID)
 	if err != nil {
 		status := statusFromServiceError(err)
 		if status == http.StatusInternalServerError {

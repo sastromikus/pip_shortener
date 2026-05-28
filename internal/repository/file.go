@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -50,20 +51,20 @@ func NewFileRepository(path string) (*FileRepository, error) {
 	return r, nil
 }
 
-func (r *FileRepository) Get(id string) (string, bool) {
-	return r.mem.Get(id)
+func (r *FileRepository) Get(ctx context.Context, id string) (string, bool) {
+	return r.mem.Get(ctx, id)
 }
 
-func (r *FileRepository) GetWithDeleted(id string) (string, bool, bool) {
-	return r.mem.GetWithDeleted(id)
+func (r *FileRepository) GetWithDeleted(ctx context.Context, id string) (string, bool, bool) {
+	return r.mem.GetWithDeleted(ctx, id)
 }
 
-func (r *FileRepository) GetByOriginal(original string) (string, bool) {
-	return r.mem.GetByOriginal(original)
+func (r *FileRepository) GetByOriginal(ctx context.Context, original string) (string, bool) {
+	return r.mem.GetByOriginal(ctx, original)
 }
 
-func (r *FileRepository) PutIfAbsent(id string, original string) (bool, error) {
-	created, err := r.mem.PutIfAbsent(id, original)
+func (r *FileRepository) PutIfAbsent(ctx context.Context, id string, original string) (bool, error) {
+	created, err := r.mem.PutIfAbsent(ctx, id, original)
 	if err != nil {
 		return false, err
 	}
@@ -79,11 +80,11 @@ func (r *FileRepository) PutIfAbsent(id string, original string) (bool, error) {
 	return true, nil
 }
 
-func (r *FileRepository) PutBatchIfAbsent(items []model.URLItem) error {
+func (r *FileRepository) PutBatchIfAbsent(ctx context.Context, items []model.URLItem) error {
 	createdIDs := make([]string, 0, len(items))
 
 	for _, item := range items {
-		created, err := r.mem.PutIfAbsent(item.ID, item.Original)
+		created, err := r.mem.PutIfAbsent(ctx, item.ID, item.Original)
 		if err != nil {
 			return err
 		}
@@ -108,32 +109,32 @@ func (r *FileRepository) PutBatchIfAbsent(items []model.URLItem) error {
 
 // Put is kept for tests and simple compatibility. Business code should prefer PutIfAbsent.
 func (r *FileRepository) Put(id string, original string) {
-	_, _ = r.PutIfAbsent(id, original)
+	_, _ = r.PutIfAbsent(context.Background(), id, original)
 }
 
 func (r *FileRepository) Exists(id string) bool {
-	_, ok := r.mem.Get(id)
+	_, ok := r.mem.Get(context.Background(), id)
 	return ok
 }
 
-func (r *FileRepository) AddUserURL(userID, shortID string) error {
-	return r.AddUserURLs(userID, []string{shortID})
+func (r *FileRepository) AddUserURL(ctx context.Context, userID, shortID string) error {
+	return r.AddUserURLs(ctx, userID, []string{shortID})
 }
 
-func (r *FileRepository) AddUserURLs(userID string, shortIDs []string) error {
-	if err := r.mem.AddUserURLs(userID, shortIDs); err != nil {
+func (r *FileRepository) AddUserURLs(ctx context.Context, userID string, shortIDs []string) error {
+	if err := r.mem.AddUserURLs(ctx, userID, shortIDs); err != nil {
 		return err
 	}
 
 	return r.saveUsers()
 }
 
-func (r *FileRepository) ListUserURLs(userID string) ([]model.UserURL, error) {
-	return r.mem.ListUserURLs(userID)
+func (r *FileRepository) ListUserURLs(ctx context.Context, userID string) ([]model.UserURL, error) {
+	return r.mem.ListUserURLs(ctx, userID)
 }
 
-func (r *FileRepository) MarkDeleted(userID string, ids []string) error {
-	if err := r.mem.MarkDeleted(userID, ids); err != nil {
+func (r *FileRepository) MarkDeleted(ctx context.Context, userID string, ids []string) error {
+	if err := r.mem.MarkDeleted(ctx, userID, ids); err != nil {
 		return err
 	}
 
@@ -158,7 +159,7 @@ func (r *FileRepository) load() error {
 	}
 
 	for _, rec := range recs {
-		_, _ = r.mem.PutIfAbsent(rec.ShortURL, rec.OriginalURL)
+		_, _ = r.mem.PutIfAbsent(context.Background(), rec.ShortURL, rec.OriginalURL)
 	}
 
 	return nil

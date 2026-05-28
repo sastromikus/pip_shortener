@@ -25,9 +25,9 @@ const (
 
 func UserIDFromContext(ctx context.Context) (string, bool) {
 	v := ctx.Value(ctxUserIDKey)
-	s, _ := v.(string)
+	s, ok := v.(string)
 
-	return s, s != ""
+	return s, ok
 }
 
 func BadCookieNoID(ctx context.Context) bool {

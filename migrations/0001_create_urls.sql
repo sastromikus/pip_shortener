@@ -1,5 +1,9 @@
+-- +goose Up
 CREATE TABLE IF NOT EXISTS urls (
-    id SERIAL PRIMARY KEY,
+    id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     short_id VARCHAR(32) NOT NULL UNIQUE,
-    original_url TEXT NOT NULL
+    original_url VARCHAR(2048) NOT NULL
 );
+
+-- +goose Down
+DROP TABLE IF EXISTS urls;

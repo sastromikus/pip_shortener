@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -50,7 +51,7 @@ func TestPOST_Shorten_Returns201AndShortURL(t *testing.T) {
 		t.Fatalf("expected non-empty id in short url, got %q", shortURL)
 	}
 
-	if _, ok := repo.Get(id); !ok {
+	if _, ok := repo.Get(context.Background(), id); !ok {
 		t.Fatalf("expected id %q to be stored", id)
 	}
 }
@@ -62,7 +63,7 @@ func TestGET_Redirect_Returns307AndLocation(t *testing.T) {
 
 	const id = "TESTID12"
 	const original = "https://example.com/path"
-	repo.PutIfAbsent(id, original)
+	repo.PutIfAbsent(context.Background(), id, original)
 
 	req := httptest.NewRequest(http.MethodGet, "http://localhost:8080/"+id, nil)
 	w := httptest.NewRecorder()

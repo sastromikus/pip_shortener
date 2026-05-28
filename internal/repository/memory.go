@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"sort"
 	"sync"
 
@@ -24,7 +25,7 @@ func NewMemoryRepository() *MemoryRepository {
 	}
 }
 
-func (r *MemoryRepository) Get(id string) (string, bool) {
+func (r *MemoryRepository) Get(ctx context.Context, id string) (string, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -32,7 +33,7 @@ func (r *MemoryRepository) Get(id string) (string, bool) {
 	return v, ok
 }
 
-func (r *MemoryRepository) GetWithDeleted(id string) (string, bool, bool) {
+func (r *MemoryRepository) GetWithDeleted(ctx context.Context, id string) (string, bool, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -44,7 +45,7 @@ func (r *MemoryRepository) GetWithDeleted(id string) (string, bool, bool) {
 	return v, true, r.deleted[id]
 }
 
-func (r *MemoryRepository) GetByOriginal(original string) (string, bool) {
+func (r *MemoryRepository) GetByOriginal(ctx context.Context, original string) (string, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -52,7 +53,7 @@ func (r *MemoryRepository) GetByOriginal(original string) (string, bool) {
 	return id, ok
 }
 
-func (r *MemoryRepository) PutIfAbsent(id string, original string) (bool, error) {
+func (r *MemoryRepository) PutIfAbsent(ctx context.Context, id string, original string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -68,7 +69,7 @@ func (r *MemoryRepository) PutIfAbsent(id string, original string) (bool, error)
 	return true, nil
 }
 
-func (r *MemoryRepository) PutBatchIfAbsent(items []model.URLItem) error {
+func (r *MemoryRepository) PutBatchIfAbsent(ctx context.Context, items []model.URLItem) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -89,7 +90,7 @@ func (r *MemoryRepository) PutBatchIfAbsent(items []model.URLItem) error {
 
 // Put is kept for tests and simple compatibility. Business code should prefer PutIfAbsent.
 func (r *MemoryRepository) Put(id string, original string) {
-	_, _ = r.PutIfAbsent(id, original)
+	_, _ = r.PutIfAbsent(context.Background(), id, original)
 }
 
 func (r *MemoryRepository) Exists(id string) bool {
@@ -158,11 +159,11 @@ func (r *MemoryRepository) DeletedItems() []string {
 	return ids
 }
 
-func (r *MemoryRepository) AddUserURL(userID, shortID string) error {
-	return r.AddUserURLs(userID, []string{shortID})
+func (r *MemoryRepository) AddUserURL(ctx context.Context, userID, shortID string) error {
+	return r.AddUserURLs(ctx, userID, []string{shortID})
 }
 
-func (r *MemoryRepository) AddUserURLs(userID string, shortIDs []string) error {
+func (r *MemoryRepository) AddUserURLs(ctx context.Context, userID string, shortIDs []string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -185,10 +186,10 @@ func (r *MemoryRepository) AddUserURLs(userID string, shortIDs []string) error {
 }
 
 func (r *MemoryRepository) LoadUserURL(userID, shortID string) {
-	_ = r.AddUserURL(userID, shortID)
+	_ = r.AddUserURL(context.Background(), userID, shortID)
 }
 
-func (r *MemoryRepository) ListUserURLs(userID string) ([]model.UserURL, error) {
+func (r *MemoryRepository) ListUserURLs(ctx context.Context, userID string) ([]model.UserURL, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -215,7 +216,7 @@ func (r *MemoryRepository) ListUserURLs(userID string) ([]model.UserURL, error) 
 	return out, nil
 }
 
-func (r *MemoryRepository) MarkDeleted(userID string, ids []string) error {
+func (r *MemoryRepository) MarkDeleted(ctx context.Context, userID string, ids []string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

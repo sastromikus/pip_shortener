@@ -27,7 +27,7 @@ func handleUserURLs(svc *service.Shortener, baseURL string, logger *slog.Logger,
 		return
 	}
 
-	items, err := svc.ListUserURLs(userID)
+	items, err := svc.ListUserURLs(r.Context(), userID)
 	if err != nil {
 		internalServerError(logger, w, "list user urls", err)
 		return

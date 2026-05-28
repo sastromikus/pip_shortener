@@ -14,7 +14,9 @@ func BenchmarkShorten(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		_, _ = svc.Shorten(fmt.Sprintf("http://example.com/benchmark/%d", i))
+		i++
 	}
 }
