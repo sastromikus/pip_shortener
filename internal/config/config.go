@@ -39,6 +39,8 @@ func Parse() Config {
 	flag.StringVar(&flagBase, "b", "", "Base URL for short links")
 	flag.StringVar(&flagFile, "f", "", "File storage path")
 	flag.StringVar(&flagDSN, "d", "", "Database DSN")
+	flag.StringVar(&flagDSN, "database-dsn", "", "Database DSN")
+	flag.StringVar(&flagDSN, "database_dsn", "", "Database DSN")
 	flag.Parse()
 
 	if flagAddr != "" {
@@ -54,16 +56,16 @@ func Parse() Config {
 		cfg.DatabaseDSN = flagDSN
 	}
 
-	if v, ok := os.LookupEnv(envServerAddr); ok && v != "" {
+	if v, ok := os.LookupEnv(envServerAddr); ok {
 		cfg.ServerAddr = v
 	}
-	if v, ok := os.LookupEnv(envBaseURL); ok && v != "" {
+	if v, ok := os.LookupEnv(envBaseURL); ok {
 		cfg.BaseURL = v
 	}
-	if v, ok := os.LookupEnv(envFileStoragePath); ok && v != "" {
+	if v, ok := os.LookupEnv(envFileStoragePath); ok {
 		cfg.FileStoragePath = v
 	}
-	if v, ok := os.LookupEnv(envDatabaseDSN); ok && v != "" {
+	if v, ok := os.LookupEnv(envDatabaseDSN); ok {
 		cfg.DatabaseDSN = v
 	}
 

@@ -1,11 +1,11 @@
 package model
 
-type URLMapping struct {
+type URLItem struct {
 	ID       string
 	Original string
 }
 
-type URLItem struct {
-	ID       string
+type UserURL struct {
+	ShortID  string
 	Original string
 }

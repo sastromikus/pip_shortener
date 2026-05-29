@@ -21,35 +21,33 @@ func NewRouter(svc *service.Shortener, baseURL string, logger *slog.Logger, db *
 	baseURL = strings.TrimRight(baseURL, "/")
 
 	r := chi.NewRouter()
+	r.Use(middleware.Auth())
 	r.Use(middleware.Gzip())
 	r.Use(middleware.Logger(logger))
 
-	r.NotFound(func(w http.ResponseWriter, r *http.Request) { badRequest(w) })
-	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) { badRequest(w) })
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) { writeStatus(w, http.StatusBadRequest) })
+	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) { writeStatus(w, http.StatusBadRequest) })
 
 	r.Post("/", func(w http.ResponseWriter, r *http.Request) {
 		handleShorten(svc, baseURL, logger, w, r)
 	})
-
 	r.Post("/api/shorten", func(w http.ResponseWriter, r *http.Request) {
 		handleAPIPostShortenJSON(svc, baseURL, logger, w, r)
 	})
-
 	r.Post("/api/shorten/batch", func(w http.ResponseWriter, r *http.Request) {
 		handleAPIPostShortenBatchJSON(svc, baseURL, logger, w, r)
 	})
-
 	r.Get("/api/user/urls", func(w http.ResponseWriter, r *http.Request) {
 		handleUserURLs(svc, baseURL, logger, w, r)
 	})
-
+	r.Delete("/api/user/urls", func(w http.ResponseWriter, r *http.Request) {
+		handleDeleteUserURLs(svc, logger, w, r)
+	})
 	r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
 		handlePing(db, w, r)
 	})
-
 	r.Get("/{id}", func(w http.ResponseWriter, r *http.Request) {
-		id := chi.URLParam(r, "id")
-		handleRedirect(svc, id, w, r)
+		handleRedirect(svc, chi.URLParam(r, "id"), w, r)
 	})
 
 	return r
@@ -57,38 +55,32 @@ func NewRouter(svc *service.Shortener, baseURL string, logger *slog.Logger, db *
 
 func handleShorten(svc *service.Shortener, baseURL string, logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
 	ct := strings.ToLower(r.Header.Get("Content-Type"))
-	if ct != "" && !strings.HasPrefix(ct, "text/plain") && !strings.HasPrefix(ct, "application/x-gzip") {
-		badRequest(w)
+	ce := strings.ToLower(r.Header.Get("Content-Encoding"))
+	if ct != "" && !(strings.HasPrefix(ct, "text/plain") || (strings.Contains(ce, "gzip") && strings.HasPrefix(ct, "application/x-gzip"))) {
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
 	body, err := readBody(w, r, maxPOSTBody)
 	if err != nil {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
 	raw := strings.TrimSpace(string(body))
 	if raw == "" {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
-	userID, err := getOrCreateUserID(w, r)
+	userID, _ := middleware.UserIDFromContext(r.Context())
+	id, existed, err := svc.ShortenForUserContext(r.Context(), raw, userID)
 	if err != nil {
-		internalServerError(logger, w, "create user id", err)
-		return
-	}
-
-	id, existed, err := svc.ShortenWithExistingForUser(raw, userID)
-	if err != nil {
-		writeShortenError(logger, w, err)
-		return
-	}
-
-	shortURL, err := buildShortURL(baseURL, id)
-	if err != nil {
-		internalServerError(logger, w, "build short url", err)
+		status := statusFromServiceError(err)
+		if status == http.StatusInternalServerError {
+			logger.Error("shorten failed", "error", err)
+		}
+		writeStatus(w, status)
 		return
 	}
 
@@ -99,19 +91,24 @@ func handleShorten(svc *service.Shortener, baseURL string, logger *slog.Logger, 
 		w.WriteHeader(http.StatusCreated)
 	}
 
-	_, _ = w.Write([]byte(shortURL))
+	_, _ = w.Write([]byte(joinURL(baseURL, id)))
 }
 
 func handleRedirect(svc *service.Shortener, id string, w http.ResponseWriter, r *http.Request) {
 	id = strings.TrimSpace(id)
 	if id == "" || strings.ContainsAny(id, " \t\r\n") {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
-	original, ok := svc.Resolve(id)
+	original, ok, deleted := svc.ResolveWithDeleted(r.Context(), id)
 	if !ok {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
+		return
+	}
+
+	if deleted {
+		writeStatus(w, http.StatusGone)
 		return
 	}
 
@@ -125,21 +122,26 @@ func readBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, erro
 	return io.ReadAll(r.Body)
 }
 
-func buildShortURL(baseURL string, id string) (string, error) {
-	return url.JoinPath(baseURL, id)
+func joinURL(baseURL string, id string) string {
+	joined, err := url.JoinPath(baseURL, id)
+	if err != nil {
+		return strings.TrimRight(baseURL, "/") + "/" + id
+	}
+	return joined
 }
 
-func writeShortenError(logger *slog.Logger, w http.ResponseWriter, err error) {
-	if errors.Is(err, service.ErrGenerateID) || errors.Is(err, service.ErrStorage) {
-		internalServerError(logger, w, "shorten failed", err)
-		return
+func statusFromServiceError(err error) int {
+	if errors.Is(err, service.ErrEmptyURL) ||
+		errors.Is(err, service.ErrUnsupportedScheme) ||
+		errors.Is(err, service.ErrEmptyHost) {
+		return http.StatusBadRequest
 	}
 
-	badRequest(w)
+	return http.StatusInternalServerError
 }
 
-func badRequest(w http.ResponseWriter) {
-	w.WriteHeader(http.StatusBadRequest)
+func writeStatus(w http.ResponseWriter, status int) {
+	http.Error(w, http.StatusText(status), status)
 }
 
 func internalServerError(logger *slog.Logger, w http.ResponseWriter, msg string, err error) {
