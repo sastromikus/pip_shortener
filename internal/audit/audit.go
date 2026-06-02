@@ -29,10 +29,32 @@ func NewNotifier(observers ...Observer) *Notifier {
 	return &Notifier{observers: observers}
 }
 
+// Enabled reports whether at least one audit observer is configured.
 func (n *Notifier) Enabled() bool {
 	return n != nil && len(n.observers) > 0
 }
 
+// NotifyAll sends the event to every configured audit observer.
+func (n *Notifier) NotifyAll(ctx context.Context, e Event) error {
+	if n == nil || len(n.observers) == 0 {
+		return nil
+	}
+
+	if e.TS == 0 {
+		e.TS = time.Now().Unix()
+	}
+
+	var firstErr error
+	for _, obs := range n.observers {
+		if err := obs.Notify(ctx, e); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	return firstErr
+}
+
+// NotifyAllAsync sends the event to every configured audit observer in background goroutines.
 func (n *Notifier) NotifyAllAsync(ctx context.Context, e Event) {
 	if n == nil || len(n.observers) == 0 {
 		return

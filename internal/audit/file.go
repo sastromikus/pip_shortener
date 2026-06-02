@@ -18,6 +18,7 @@ func NewFileObserver(path string) *FileObserver {
 	return &FileObserver{path: path}
 }
 
+// Notify writes one audit event to the configured file.
 func (o *FileObserver) Notify(ctx context.Context, e Event) error {
 	b, err := json.Marshal(e)
 	if err != nil {

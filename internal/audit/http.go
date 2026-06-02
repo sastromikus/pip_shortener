@@ -24,6 +24,7 @@ func NewHTTPObserver(url string) *HTTPObserver {
 	}
 }
 
+// Notify sends one audit event to the configured HTTP endpoint.
 func (o *HTTPObserver) Notify(ctx context.Context, e Event) error {
 	b, err := json.Marshal(e)
 	if err != nil {
@@ -52,6 +53,7 @@ type httpError struct {
 	status int
 }
 
+// Error returns a human-readable HTTP audit error.
 func (e *httpError) Error() string {
 	return "audit http status: " + http.StatusText(e.status)
 }

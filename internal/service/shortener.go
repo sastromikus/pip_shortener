@@ -1,13 +1,16 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/sastromikus/pip_shortener/internal/repository"
+	"github.com/sastromikus/pip_shortener/internal/model"
 )
 
 const (
@@ -15,17 +18,47 @@ const (
 	stringbase = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 )
 
-// URLRepository is the subset of repository operations required by Shortener.
+// ErrEmptyURL is returned when an empty URL is passed to the shortener.
+var ErrEmptyURL = errors.New("empty url")
+
+// ErrUnsupportedScheme is returned when a URL has an unsupported scheme.
+var ErrUnsupportedScheme = errors.New("unsupported scheme")
+
+// ErrEmptyHost is returned when a URL does not contain a host.
+var ErrEmptyHost = errors.New("empty host")
+
+// ErrGenerateID is returned when the service cannot generate a unique short ID.
+var ErrGenerateID = errors.New("could not generate unique id")
+
+// ErrStorage is returned when a storage operation fails.
+var ErrStorage = errors.New("storage error")
+
+// ErrDeleteQueueFull is returned when an asynchronous delete task cannot be queued.
+var ErrDeleteQueueFull = errors.New("delete queue is full")
+
+// URLRepository describes storage operations required by Shortener.
 type URLRepository interface {
-	Get(id string) (string, bool)
-	Put(id string, original string)
-	Exists(id string) bool
+	Get(ctx context.Context, id string) (string, bool)
+	GetWithDeleted(ctx context.Context, id string) (string, bool, bool)
+	GetByOriginal(ctx context.Context, original string) (string, bool)
+	PutIfAbsent(ctx context.Context, id string, original string) (bool, error)
+	PutBatchIfAbsent(ctx context.Context, items []model.URLItem) error
+	AddUserURL(ctx context.Context, userID, shortID string) error
+	AddUserURLs(ctx context.Context, userID string, shortIDs []string) error
+	ListUserURLs(ctx context.Context, userID string) ([]model.UserURL, error)
+	MarkDeleted(ctx context.Context, userID string, ids []string) error
 }
 
-// Shortener implements URL shortening business logic.
-type Shortener struct {
-	repo     repository.URLRepository
-	deleteCh chan DeleteTask
+// BatchItem describes one batch shortening request.
+type BatchItem struct {
+	CorrelationID string
+	OriginalURL   string
+}
+
+// BatchResult describes one batch shortening result.
+type BatchResult struct {
+	CorrelationID string
+	ID            string
 }
 
 // DeleteTask represents a request to delete multiple short URLs for a user.
@@ -34,130 +67,390 @@ type DeleteTask struct {
 	IDs    []string
 }
 
-// NewShortener creates a new Shortener using the provided repository.
-func NewShortener(repo repository.URLRepository) *Shortener {
-	s := &Shortener{repo: repo, deleteCh: make(chan DeleteTask, 1024)}
+// Shortener implements URL shortening business logic.
+type Shortener struct {
+	repo     URLRepository
+	deleteCh chan DeleteTask
+}
 
-	return s
+// NewShortener creates a new Shortener using the provided repository.
+func NewShortener(repo URLRepository) *Shortener {
+	return &Shortener{
+		repo:     repo,
+		deleteCh: make(chan DeleteTask, 1024),
+	}
 }
 
 // Shorten creates or returns a short id for the provided URL.
 func (s *Shortener) Shorten(raw string) (string, error) {
-	id, _, err := s.ShortenWithExisting(raw)
+	id, _, err := s.ShortenWithExistingContext(context.Background(), raw)
 	return id, err
 }
 
-func (s *Shortener) ShortenWithExisting(raw string) (string, bool, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", false, errors.New("empty url")
-	}
-	if !strings.Contains(raw, "://") {
-		raw = "http://" + raw
-	}
-
-	if pg, ok := s.repo.(*repository.PostgresRepository); ok {
-		const (
-			originalUQ = "urls_original_url_uq"
-			shortUQ    = "urls_short_id_key"
-		)
-
-		for tries := 0; tries < 10; tries++ {
-			id, err := s.generateUniqueID(idLen, 10)
-			if err != nil {
-				return "", false, err
-			}
-
-			err = pg.Insert(id, raw)
-			if err == nil {
-				return id, false, nil
-			}
-
-			if repository.IsUniqueViolationOn(err, originalUQ) {
-				existing, ok := pg.GetByOriginal(raw)
-				if ok {
-					return existing, true, nil
-				}
-				return "", false, err
-			}
-
-			if repository.IsUniqueViolationOn(err, shortUQ) {
-				continue
-			}
-
-			return "", false, err
-		}
-		return "", false, errors.New("cannot insert url")
-	}
-
-	id, err := s.generateUniqueID(idLen, 10)
-	if err != nil {
-		return "", false, err
-	}
-	s.repo.Put(id, raw)
-
-	return id, false, nil
+// ShortenForUser creates a short URL and associates it with a user.
+func (s *Shortener) ShortenForUser(raw string, userID string) (string, bool, error) {
+	return s.ShortenForUserContext(context.Background(), raw, userID)
 }
 
-// ShortenForUser creates a short URL and associates it with user if userID is provided.
-func (s *Shortener) ShortenForUser(raw, userID string) (string, bool, error) {
-	id, existed, err := s.ShortenWithExisting(raw)
+// ShortenForUserContext creates a short URL using the provided context.
+func (s *Shortener) ShortenForUserContext(ctx context.Context, raw string, userID string) (string, bool, error) {
+	id, existed, err := s.ShortenWithExistingContext(ctx, raw)
 	if err != nil {
 		return "", false, err
 	}
 
-	if userID != "" {
-		if us, ok := s.repo.(interface {
-			AddUserURL(userID, shortID string) error
-		}); ok {
-			_ = us.AddUserURL(userID, id)
-		}
+	if err := s.addUserURL(ctx, userID, id); err != nil {
+		return "", false, err
 	}
 
 	return id, existed, nil
 }
 
+// ShortenWithExisting creates a short id or returns an existing one.
+func (s *Shortener) ShortenWithExisting(raw string) (string, bool, error) {
+	return s.ShortenWithExistingContext(context.Background(), raw)
+}
+
+// ShortenWithExistingContext creates a short id or returns an existing one using context.
+func (s *Shortener) ShortenWithExistingContext(ctx context.Context, raw string) (string, bool, error) {
+	normalized, err := normalizeURL(raw)
+	if err != nil {
+		return "", false, err
+	}
+
+	if existingID, ok := s.repo.GetByOriginal(ctx, normalized); ok {
+		return existingID, true, nil
+	}
+
+	return s.shortenWithUniqueID(ctx, normalized, idLen, 10)
+}
+
+// ShortenBatch shortens multiple URLs.
+func (s *Shortener) ShortenBatch(items []BatchItem, userID string) ([]BatchResult, error) {
+	return s.ShortenBatchContext(context.Background(), items, userID)
+}
+
+// ShortenBatchContext shortens multiple URLs using context.
+func (s *Shortener) ShortenBatchContext(ctx context.Context, items []BatchItem, userID string) ([]BatchResult, error) {
+	results := make([]BatchResult, 0, len(items))
+	normalizedByIndex := make([]string, 0, len(items))
+	idByOriginal := make(map[string]string, len(items))
+	usedIDs := make(map[string]struct{}, len(items))
+	toCreate := make([]model.URLItem, 0, len(items))
+
+	for _, item := range items {
+		normalized, err := normalizeURL(item.OriginalURL)
+		if err != nil {
+			return nil, err
+		}
+
+		normalizedByIndex = append(normalizedByIndex, normalized)
+		results = append(results, BatchResult{CorrelationID: item.CorrelationID})
+
+		if id, ok := idByOriginal[normalized]; ok {
+			results[len(results)-1].ID = id
+			continue
+		}
+
+		if existingID, ok := s.repo.GetByOriginal(ctx, normalized); ok {
+			idByOriginal[normalized] = existingID
+			results[len(results)-1].ID = existingID
+			continue
+		}
+
+		id, err := s.generateBatchID(ctx, usedIDs, idLen, 10)
+		if err != nil {
+			return nil, err
+		}
+
+		idByOriginal[normalized] = id
+		results[len(results)-1].ID = id
+		toCreate = append(toCreate, model.URLItem{ID: id, Original: normalized})
+	}
+
+	if len(toCreate) > 0 {
+		if err := s.repo.PutBatchIfAbsent(ctx, toCreate); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrStorage, err)
+		}
+	}
+
+	for _, item := range toCreate {
+		if storedOriginal, ok := s.repo.Get(ctx, item.ID); ok && storedOriginal == item.Original {
+			continue
+		}
+
+		existingID, ok := s.repo.GetByOriginal(ctx, item.Original)
+		if !ok {
+			return nil, ErrStorage
+		}
+		idByOriginal[item.Original] = existingID
+	}
+
+	shortIDs := make([]string, 0, len(results))
+	for i, normalized := range normalizedByIndex {
+		results[i].ID = idByOriginal[normalized]
+		shortIDs = append(shortIDs, results[i].ID)
+	}
+
+	if err := s.addUserURLs(ctx, userID, shortIDs); err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+// Resolve returns the original URL by short id.
+func (s *Shortener) Resolve(id string) (string, bool) {
+	return s.ResolveContext(context.Background(), id)
+}
+
+// ResolveContext returns the original URL by short id using context.
+func (s *Shortener) ResolveContext(ctx context.Context, id string) (string, bool) {
+	return s.repo.Get(ctx, id)
+}
+
+// ResolveWithDeleted resolves a short id and reports whether it was deleted.
+func (s *Shortener) ResolveWithDeleted(ctx context.Context, id string) (string, bool, bool) {
+	return s.repo.GetWithDeleted(ctx, id)
+}
+
 // ListUserURLs returns all URLs created by the given user.
-func (s *Shortener) ListUserURLs(userID string) ([]repository.UserURL, error) {
-	us, ok := s.repo.(interface {
-		ListUserURLs(userID string) ([]repository.UserURL, error)
-	})
-	if !ok {
+func (s *Shortener) ListUserURLs(ctx context.Context, userID string) ([]model.UserURL, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
 		return nil, nil
 	}
 
-	return us.ListUserURLs(userID)
+	return s.repo.ListUserURLs(ctx, userID)
 }
 
-func (s *Shortener) Resolve(id string) (string, bool) {
-	return s.repo.Get(id)
+// EnqueueDelete queues an asynchronous delete request.
+func (s *Shortener) EnqueueDelete(userID string, ids []string) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" || len(ids) == 0 {
+		return nil
+	}
+
+	cleanIDs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			cleanIDs = append(cleanIDs, id)
+		}
+	}
+
+	if len(cleanIDs) == 0 {
+		return nil
+	}
+
+	select {
+	case s.deleteCh <- DeleteTask{UserID: userID, IDs: cleanIDs}:
+		return nil
+	default:
+		return ErrDeleteQueueFull
+	}
 }
 
-func (s *Shortener) generateUniqueID(length int, tries int) (string, error) {
+// StartDeleteWorker starts background processing of delete tasks.
+func (s *Shortener) StartDeleteWorker(ctx context.Context, batchSize int, flushEvery time.Duration, logError func(error)) func() {
+	if batchSize <= 0 {
+		batchSize = 64
+	}
+	if flushEvery <= 0 {
+		flushEvery = 500 * time.Millisecond
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+
+		pending := make(map[string]map[string]struct{})
+		count := 0
+
+		addTask := func(task DeleteTask) {
+			if task.UserID == "" || len(task.IDs) == 0 {
+				return
+			}
+
+			set := pending[task.UserID]
+			if set == nil {
+				set = make(map[string]struct{})
+				pending[task.UserID] = set
+			}
+
+			for _, id := range task.IDs {
+				id = strings.TrimSpace(id)
+				if id == "" {
+					continue
+				}
+				set[id] = struct{}{}
+				count++
+			}
+		}
+
+		flush := func() {
+			for userID, set := range pending {
+				if len(set) == 0 {
+					continue
+				}
+
+				ids := make([]string, 0, len(set))
+				for id := range set {
+					ids = append(ids, id)
+				}
+
+				flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				if err := s.repo.MarkDeleted(flushCtx, userID, ids); err != nil && logError != nil {
+					logError(err)
+				}
+				cancel()
+
+				delete(pending, userID)
+			}
+			count = 0
+		}
+
+		drainAndFlush := func() {
+			for {
+				select {
+				case task := <-s.deleteCh:
+					addTask(task)
+				default:
+					flush()
+					return
+				}
+			}
+		}
+
+		ticker := time.NewTicker(flushEvery)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				drainAndFlush()
+				return
+
+			case task := <-s.deleteCh:
+				addTask(task)
+				if count >= batchSize {
+					flush()
+				}
+
+			case <-ticker.C:
+				if count > 0 {
+					flush()
+				}
+			}
+		}
+	}()
+
+	return wg.Wait
+}
+
+func (s *Shortener) addUserURL(ctx context.Context, userID string, shortID string) error {
+	return s.addUserURLs(ctx, userID, []string{shortID})
+}
+
+func (s *Shortener) addUserURLs(ctx context.Context, userID string, shortIDs []string) error {
+	userID = strings.TrimSpace(userID)
+	if userID == "" || len(shortIDs) == 0 {
+		return nil
+	}
+
+	if len(shortIDs) == 1 {
+		if err := s.repo.AddUserURL(ctx, userID, shortIDs[0]); err != nil {
+			return fmt.Errorf("%w: %w", ErrStorage, err)
+		}
+		return nil
+	}
+
+	if err := s.repo.AddUserURLs(ctx, userID, shortIDs); err != nil {
+		return fmt.Errorf("%w: %w", ErrStorage, err)
+	}
+	return nil
+}
+
+func (s *Shortener) shortenWithUniqueID(ctx context.Context, raw string, length int, tries int) (string, bool, error) {
 	for i := 0; i < tries; i++ {
 		id, err := randomstringbase(length)
 		if err != nil {
-			return "", err
+			return "", false, fmt.Errorf("%w: %w", ErrGenerateID, err)
 		}
-		if !s.repo.Exists(id) {
-			return id, nil
+
+		created, err := s.repo.PutIfAbsent(ctx, id, raw)
+		if err != nil {
+			if existingID, ok := s.repo.GetByOriginal(ctx, raw); ok {
+				return existingID, true, nil
+			}
+			return "", false, fmt.Errorf("%w: %w", ErrStorage, err)
+		}
+
+		if created {
+			return id, false, nil
 		}
 	}
-	return "", errors.New("could not generate unique id")
+
+	if existingID, ok := s.repo.GetByOriginal(ctx, raw); ok {
+		return existingID, true, nil
+	}
+
+	return "", false, ErrGenerateID
+}
+
+func (s *Shortener) generateBatchID(ctx context.Context, used map[string]struct{}, length int, tries int) (string, error) {
+	for i := 0; i < tries; i++ {
+		id, err := randomstringbase(length)
+		if err != nil {
+			return "", fmt.Errorf("%w: %w", ErrGenerateID, err)
+		}
+
+		if _, ok := used[id]; ok {
+			continue
+		}
+		if _, ok := s.repo.Get(ctx, id); ok {
+			continue
+		}
+
+		used[id] = struct{}{}
+		return id, nil
+	}
+
+	return "", ErrGenerateID
+}
+
+func normalizeURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", ErrEmptyURL
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "http://" + raw
+	}
+	if err := validateURL(raw); err != nil {
+		return "", err
+	}
+
+	return raw, nil
 }
 
 func randomstringbase(n int) (string, error) {
 	if n <= 0 {
 		return "", errors.New("invalid length")
 	}
+
 	buf := make([]byte, n)
 	if _, err := rand.Read(buf); err != nil {
 		return "", err
 	}
+
 	out := make([]byte, n)
 	for i := 0; i < n; i++ {
 		out[i] = stringbase[int(buf[i])%len(stringbase)]
 	}
+
 	return string(out), nil
 }
 
@@ -167,109 +460,11 @@ func validateURL(raw string) error {
 		return err
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return errors.New("unsupported scheme")
+		return ErrUnsupportedScheme
 	}
 	if u.Host == "" {
-		return errors.New("empty host")
+		return ErrEmptyHost
 	}
+
 	return nil
-}
-
-// EnqueueDelete queues an asynchronous delete request.
-func (s *Shortener) EnqueueDelete(userID string, ids []string) {
-	if userID == "" || len(ids) == 0 {
-		return
-	}
-
-	select {
-	case s.deleteCh <- DeleteTask{UserID: userID, IDs: ids}:
-	default:
-	}
-}
-
-// StartDeleteWorker starts background processing of delete tasks.
-func (s *Shortener) StartDeleteWorker(batchSize int, flushEvery time.Duration) {
-	pg, ok := s.repo.(*repository.PostgresRepository)
-	if !ok {
-		return
-	}
-
-	if batchSize <= 0 {
-		batchSize = 64
-	}
-	if flushEvery <= 0 {
-		flushEvery = 500 * time.Millisecond
-	}
-
-	go func() {
-		type bucket struct {
-			ids map[string]struct{}
-		}
-
-		pending := make(map[string]map[string]struct{})
-
-		flush := func() {
-			for userID, set := range pending {
-				if len(set) == 0 {
-					continue
-				}
-				ids := make([]string, 0, len(set))
-				for id := range set {
-					ids = append(ids, id)
-				}
-				_ = pg.MarkDeleted(userID, ids)
-				delete(pending, userID)
-			}
-		}
-
-		ticker := time.NewTicker(flushEvery)
-		defer ticker.Stop()
-
-		count := 0
-		for {
-			select {
-			case task, ok := <-s.deleteCh:
-				if !ok {
-					return
-				}
-				if task.UserID == "" || len(task.IDs) == 0 {
-					continue
-				}
-				set := pending[task.UserID]
-				if set == nil {
-					set = make(map[string]struct{})
-					pending[task.UserID] = set
-				}
-				for _, id := range task.IDs {
-					id = strings.TrimSpace(id)
-					if id == "" {
-						continue
-					}
-					set[id] = struct{}{}
-					count++
-				}
-				if count >= batchSize {
-					flush()
-					count = 0
-				}
-
-			case <-ticker.C:
-				if count > 0 {
-					flush()
-					count = 0
-				}
-			}
-		}
-	}()
-}
-
-// ResolveWithDeleted resolves a short id and reports whether it was deleted.
-func (s *Shortener) ResolveWithDeleted(id string) (string, bool, bool) {
-	if pg, ok := s.repo.(*repository.PostgresRepository); ok {
-		return pg.GetWithDeleted(id)
-	}
-
-	original, ok := s.repo.Get(id)
-
-	return original, ok, false
 }

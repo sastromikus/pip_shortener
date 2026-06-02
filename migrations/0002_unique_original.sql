@@ -1,11 +1,6 @@
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_constraint
-    WHERE conname = 'urls_original_url_uq'
-  ) THEN
-    ALTER TABLE urls
-      ADD CONSTRAINT urls_original_url_uq UNIQUE (original_url);
-  END IF;
-END $$;
+-- +goose Up
+CREATE UNIQUE INDEX IF NOT EXISTS urls_original_url_idx
+ON urls (original_url);
+
+-- +goose Down
+DROP INDEX IF EXISTS urls_original_url_idx;
