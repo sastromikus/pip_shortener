@@ -15,6 +15,7 @@ profiles/*.pprof
 # Binaries
 cmd/shortener/main
 cmd/shortener/shortener
+cmd/shortener/shortener.exe
 
 # Dependency directories (remove the comment below to include it)
 vendor/

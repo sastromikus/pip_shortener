@@ -279,6 +279,18 @@ func (s *Shortener) StartDeleteWorker(ctx context.Context, batchSize int, flushE
 				set = make(map[string]struct{})
 				pending[task.UserID] = set
 			}
+		}
+
+		flush := func() {
+			for userID, set := range pending {
+				if len(set) == 0 {
+					continue
+				}
+
+				ids := make([]string, 0, len(set))
+				for id := range set {
+					ids = append(ids, id)
+				}
 
 			for _, id := range task.IDs {
 				id = strings.TrimSpace(id)

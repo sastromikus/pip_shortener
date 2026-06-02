@@ -69,6 +69,7 @@ func run() error {
 	}
 
 	svc := service.NewShortener(repo)
+
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	defer workerCancel()
 
@@ -77,6 +78,7 @@ func run() error {
 	})
 
 	router := handler.NewRouter(svc, cfg.BaseURL, logger, db, auditor)
+
 	srv := &http.Server{
 		Addr:    cfg.ServerAddr,
 		Handler: router,
