@@ -128,7 +128,7 @@ func notifyAudit(logger *slog.Logger, r *http.Request, auditor *audit.Notifier, 
 		return
 	}
 
-	if err := auditor.NotifyAll(r.Context(), event); err != nil && logger != nil {
+	if err := auditor.Enqueue(event); err != nil && logger != nil {
 		logger.Error("audit notify failed", "error", err)
 	}
 }

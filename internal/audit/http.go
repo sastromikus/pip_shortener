@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 )
+
+const httpRetryCount = 3
 
 // HTTPObserver sends audit events to a remote HTTP endpoint using POST with JSON body.
 type HTTPObserver struct {
@@ -31,7 +34,26 @@ func (o *HTTPObserver) Notify(ctx context.Context, e Event) error {
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.url, bytes.NewReader(b))
+	var lastErr error
+	for attempt := 0; attempt < httpRetryCount; attempt++ {
+		if attempt > 0 {
+			if err := sleepBeforeRetry(ctx, attempt); err != nil {
+				return err
+			}
+		}
+
+		err := o.post(ctx, b)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+	}
+
+	return lastErr
+}
+
+func (o *HTTPObserver) post(ctx context.Context, body []byte) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.url, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -49,11 +71,23 @@ func (o *HTTPObserver) Notify(ctx context.Context, e Event) error {
 	return nil
 }
 
+func sleepBeforeRetry(ctx context.Context, attempt int) error {
+	timer := time.NewTimer(time.Duration(attempt) * 100 * time.Millisecond)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
 type httpError struct {
 	status int
 }
 
 // Error returns a human-readable HTTP audit error.
 func (e *httpError) Error() string {
-	return "audit http status: " + http.StatusText(e.status)
+	return fmt.Sprintf("audit http status: %d %s", e.status, http.StatusText(e.status))
 }

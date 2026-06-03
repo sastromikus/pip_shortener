@@ -38,12 +38,21 @@ func run() error {
 
 	observers := make([]audit.Observer, 0, 2)
 	if cfg.AuditFile != "" {
-		observers = append(observers, audit.NewFileObserver(cfg.AuditFile))
+		fileObserver, err := audit.NewFileObserver(cfg.AuditFile)
+		if err != nil {
+			return fmt.Errorf("audit file observer: %w", err)
+		}
+		observers = append(observers, fileObserver)
 	}
 	if cfg.AuditURL != "" {
 		observers = append(observers, audit.NewHTTPObserver(cfg.AuditURL))
 	}
 	auditor := audit.NewNotifier(observers...)
+	defer func() {
+		if err := auditor.Close(); err != nil {
+			logger.Error("audit shutdown failed", "error", err)
+		}
+	}()
 
 	if cfg.DatabaseDSN != "" {
 		dbCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

@@ -2,8 +2,12 @@ package audit
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"time"
 )
+
+const defaultQueueSize = 1024
 
 // Event describes a single audit event emitted by the service.
 type Event struct {
@@ -18,15 +22,29 @@ type Observer interface {
 	Notify(ctx context.Context, e Event) error
 }
 
+// ErrQueueFull is returned when an audit event cannot be queued.
+var ErrQueueFull = errors.New("audit queue is full")
+
 // Notifier broadcasts audit events to all configured observers.
 type Notifier struct {
 	observers []Observer
+	queue     chan Event
+	wg        sync.WaitGroup
 }
 
 // NewNotifier creates a Notifier with the provided observers.
 // If no observers are provided, the notifier is effectively disabled.
 func NewNotifier(observers ...Observer) *Notifier {
-	return &Notifier{observers: observers}
+	n := &Notifier{observers: observers}
+	if len(observers) == 0 {
+		return n
+	}
+
+	n.queue = make(chan Event, defaultQueueSize)
+	n.wg.Add(1)
+	go n.run()
+
+	return n
 }
 
 // Enabled reports whether at least one audit observer is configured.
@@ -34,15 +52,13 @@ func (n *Notifier) Enabled() bool {
 	return n != nil && len(n.observers) > 0
 }
 
-// NotifyAll sends the event to every configured audit observer.
+// NotifyAll sends the event to every configured audit observer synchronously.
 func (n *Notifier) NotifyAll(ctx context.Context, e Event) error {
 	if n == nil || len(n.observers) == 0 {
 		return nil
 	}
 
-	if e.TS == 0 {
-		e.TS = time.Now().Unix()
-	}
+	e = withTimestamp(e)
 
 	var firstErr error
 	for _, obs := range n.observers {
@@ -54,20 +70,56 @@ func (n *Notifier) NotifyAll(ctx context.Context, e Event) error {
 	return firstErr
 }
 
-// NotifyAllAsync sends the event to every configured audit observer in background goroutines.
-func (n *Notifier) NotifyAllAsync(ctx context.Context, e Event) {
+// Enqueue schedules the event for background delivery without blocking the HTTP response.
+func (n *Notifier) Enqueue(e Event) error {
 	if n == nil || len(n.observers) == 0 {
-		return
+		return nil
 	}
 
+	e = withTimestamp(e)
+	select {
+	case n.queue <- e:
+		return nil
+	default:
+		return ErrQueueFull
+	}
+}
+
+// Close waits until queued audit events are processed and closes observers that own resources.
+func (n *Notifier) Close() error {
+	if n == nil || len(n.observers) == 0 {
+		return nil
+	}
+
+	close(n.queue)
+	n.wg.Wait()
+
+	var firstErr error
+	for _, obs := range n.observers {
+		closer, ok := obs.(interface{ Close() error })
+		if !ok {
+			continue
+		}
+		if err := closer.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	return firstErr
+}
+
+func (n *Notifier) run() {
+	defer n.wg.Done()
+	for e := range n.queue {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		_ = n.NotifyAll(ctx, e)
+		cancel()
+	}
+}
+
+func withTimestamp(e Event) Event {
 	if e.TS == 0 {
 		e.TS = time.Now().Unix()
 	}
-
-	for _, obs := range n.observers {
-		o := obs
-		go func() {
-			_ = o.Notify(ctx, e)
-		}()
-	}
+	return e
 }
