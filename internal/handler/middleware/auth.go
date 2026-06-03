@@ -23,6 +23,7 @@ const (
 	ctxBadCookieKey
 )
 
+// UserIDFromContext extracts a verified user id from request context.
 func UserIDFromContext(ctx context.Context) (string, bool) {
 	v := ctx.Value(ctxUserIDKey)
 	s, ok := v.(string)
@@ -30,6 +31,7 @@ func UserIDFromContext(ctx context.Context) (string, bool) {
 	return s, ok
 }
 
+// BadCookieNoID reports whether the request contained an invalid user cookie.
 func BadCookieNoID(ctx context.Context) bool {
 	v := ctx.Value(ctxBadCookieKey)
 	b, _ := v.(bool)
@@ -37,6 +39,7 @@ func BadCookieNoID(ctx context.Context) bool {
 	return b
 }
 
+// Auth ensures a signed user_id cookie exists and stores user id in request context.
 func Auth() func(http.Handler) http.Handler {
 	secret := []byte(os.Getenv("COOKIE_SECRET"))
 	if len(secret) == 0 {

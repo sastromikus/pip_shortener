@@ -9,14 +9,17 @@ import (
 	"github.com/sastromikus/pip_shortener/internal/model"
 )
 
+// PostgresRepository stores URLs in PostgreSQL.
 type PostgresRepository struct {
 	db *sql.DB
 }
 
+// NewPostgresRepository creates a PostgreSQL repository around an existing DB handle.
 func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
+// NewPostgresStorage opens PostgreSQL storage and applies migrations.
 func NewPostgresStorage(ctx context.Context, dsn string) (*sql.DB, *PostgresRepository, error) {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
@@ -36,6 +39,7 @@ func NewPostgresStorage(ctx context.Context, dsn string) (*sql.DB, *PostgresRepo
 	return db, NewPostgresRepository(db), nil
 }
 
+// Get returns the original URL by short id.
 func (r *PostgresRepository) Get(ctx context.Context, id string) (string, bool) {
 	var original string
 	err := r.db.QueryRowContext(ctx,
@@ -49,6 +53,7 @@ func (r *PostgresRepository) Get(ctx context.Context, id string) (string, bool) 
 	return original, true
 }
 
+// GetWithDeleted returns the original URL and deletion state by short id.
 func (r *PostgresRepository) GetWithDeleted(ctx context.Context, id string) (string, bool, bool) {
 	var original string
 	var deleted bool
@@ -64,6 +69,7 @@ func (r *PostgresRepository) GetWithDeleted(ctx context.Context, id string) (str
 	return original, true, deleted
 }
 
+// GetByOriginal returns the short id for an original URL.
 func (r *PostgresRepository) GetByOriginal(ctx context.Context, original string) (string, bool) {
 	var shortID string
 	err := r.db.QueryRowContext(ctx,
@@ -77,6 +83,7 @@ func (r *PostgresRepository) GetByOriginal(ctx context.Context, original string)
 	return shortID, true
 }
 
+// PutIfAbsent stores a URL only when neither short id nor original URL exists.
 func (r *PostgresRepository) PutIfAbsent(ctx context.Context, id string, original string) (bool, error) {
 	res, err := r.db.ExecContext(ctx,
 		`INSERT INTO urls (short_id, original_url)
@@ -97,6 +104,7 @@ func (r *PostgresRepository) PutIfAbsent(ctx context.Context, id string, origina
 	return rows > 0, nil
 }
 
+// PutBatchIfAbsent stores multiple URL records when they are absent.
 func (r *PostgresRepository) PutBatchIfAbsent(ctx context.Context, items []model.URLItem) error {
 	if len(items) == 0 {
 		return nil
@@ -126,15 +134,18 @@ func (r *PostgresRepository) Put(id string, original string) {
 	_, _ = r.PutIfAbsent(context.Background(), id, original)
 }
 
+// Exists reports whether a short id is already stored.
 func (r *PostgresRepository) Exists(id string) bool {
 	_, ok := r.Get(context.Background(), id)
 	return ok
 }
 
+// AddUserURL associates a short id with a user.
 func (r *PostgresRepository) AddUserURL(ctx context.Context, userID, shortID string) error {
 	return r.AddUserURLs(ctx, userID, []string{shortID})
 }
 
+// AddUserURLs associates multiple short ids with a user.
 func (r *PostgresRepository) AddUserURLs(ctx context.Context, userID string, shortIDs []string) error {
 	if userID == "" || len(shortIDs) == 0 {
 		return nil
@@ -159,6 +170,7 @@ func (r *PostgresRepository) AddUserURLs(ctx context.Context, userID string, sho
 	return err
 }
 
+// ListUserURLs returns all non-deleted URLs owned by a user.
 func (r *PostgresRepository) ListUserURLs(ctx context.Context, userID string) ([]model.UserURL, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT u.short_id, u.original_url
@@ -189,6 +201,7 @@ func (r *PostgresRepository) ListUserURLs(ctx context.Context, userID string) ([
 	return out, nil
 }
 
+// MarkDeleted marks user-owned URLs as deleted.
 func (r *PostgresRepository) MarkDeleted(ctx context.Context, userID string, ids []string) error {
 	if userID == "" || len(ids) == 0 {
 		return nil

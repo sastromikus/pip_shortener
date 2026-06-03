@@ -18,15 +18,25 @@ const (
 	stringbase = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 )
 
-var (
-	ErrEmptyURL          = errors.New("empty url")
-	ErrUnsupportedScheme = errors.New("unsupported scheme")
-	ErrEmptyHost         = errors.New("empty host")
-	ErrGenerateID        = errors.New("could not generate unique id")
-	ErrStorage           = errors.New("storage error")
-	ErrDeleteQueueFull   = errors.New("delete queue is full")
-)
+// ErrEmptyURL is returned when an empty URL is passed to the shortener.
+var ErrEmptyURL = errors.New("empty url")
 
+// ErrUnsupportedScheme is returned when a URL has an unsupported scheme.
+var ErrUnsupportedScheme = errors.New("unsupported scheme")
+
+// ErrEmptyHost is returned when a URL does not contain a host.
+var ErrEmptyHost = errors.New("empty host")
+
+// ErrGenerateID is returned when the service cannot generate a unique short ID.
+var ErrGenerateID = errors.New("could not generate unique id")
+
+// ErrStorage is returned when a storage operation fails.
+var ErrStorage = errors.New("storage error")
+
+// ErrDeleteQueueFull is returned when an asynchronous delete task cannot be queued.
+var ErrDeleteQueueFull = errors.New("delete queue is full")
+
+// URLRepository describes storage operations required by Shortener.
 type URLRepository interface {
 	Get(ctx context.Context, id string) (string, bool)
 	GetWithDeleted(ctx context.Context, id string) (string, bool, bool)
@@ -39,26 +49,31 @@ type URLRepository interface {
 	MarkDeleted(ctx context.Context, userID string, ids []string) error
 }
 
+// BatchItem describes one batch shortening request.
 type BatchItem struct {
 	CorrelationID string
 	OriginalURL   string
 }
 
+// BatchResult describes one batch shortening result.
 type BatchResult struct {
 	CorrelationID string
 	ID            string
 }
 
+// DeleteTask represents a request to delete multiple short URLs for a user.
 type DeleteTask struct {
 	UserID string
 	IDs    []string
 }
 
+// Shortener implements URL shortening business logic.
 type Shortener struct {
 	repo     URLRepository
 	deleteCh chan DeleteTask
 }
 
+// NewShortener creates a new Shortener using the provided repository.
 func NewShortener(repo URLRepository) *Shortener {
 	return &Shortener{
 		repo:     repo,
@@ -66,15 +81,18 @@ func NewShortener(repo URLRepository) *Shortener {
 	}
 }
 
+// Shorten creates or returns a short id for the provided URL.
 func (s *Shortener) Shorten(raw string) (string, error) {
 	id, _, err := s.ShortenWithExistingContext(context.Background(), raw)
 	return id, err
 }
 
+// ShortenForUser creates a short URL and associates it with a user.
 func (s *Shortener) ShortenForUser(raw string, userID string) (string, bool, error) {
 	return s.ShortenForUserContext(context.Background(), raw, userID)
 }
 
+// ShortenForUserContext creates a short URL using the provided context.
 func (s *Shortener) ShortenForUserContext(ctx context.Context, raw string, userID string) (string, bool, error) {
 	id, existed, err := s.ShortenWithExistingContext(ctx, raw)
 	if err != nil {
@@ -88,10 +106,12 @@ func (s *Shortener) ShortenForUserContext(ctx context.Context, raw string, userI
 	return id, existed, nil
 }
 
+// ShortenWithExisting creates a short id or returns an existing one.
 func (s *Shortener) ShortenWithExisting(raw string) (string, bool, error) {
 	return s.ShortenWithExistingContext(context.Background(), raw)
 }
 
+// ShortenWithExistingContext creates a short id or returns an existing one using context.
 func (s *Shortener) ShortenWithExistingContext(ctx context.Context, raw string) (string, bool, error) {
 	normalized, err := normalizeURL(raw)
 	if err != nil {
@@ -105,10 +125,12 @@ func (s *Shortener) ShortenWithExistingContext(ctx context.Context, raw string) 
 	return s.shortenWithUniqueID(ctx, normalized, idLen, 10)
 }
 
+// ShortenBatch shortens multiple URLs.
 func (s *Shortener) ShortenBatch(items []BatchItem, userID string) ([]BatchResult, error) {
 	return s.ShortenBatchContext(context.Background(), items, userID)
 }
 
+// ShortenBatchContext shortens multiple URLs using context.
 func (s *Shortener) ShortenBatchContext(ctx context.Context, items []BatchItem, userID string) ([]BatchResult, error) {
 	results := make([]BatchResult, 0, len(items))
 	normalizedByIndex := make([]string, 0, len(items))
@@ -177,18 +199,22 @@ func (s *Shortener) ShortenBatchContext(ctx context.Context, items []BatchItem, 
 	return results, nil
 }
 
+// Resolve returns the original URL by short id.
 func (s *Shortener) Resolve(id string) (string, bool) {
 	return s.ResolveContext(context.Background(), id)
 }
 
+// ResolveContext returns the original URL by short id using context.
 func (s *Shortener) ResolveContext(ctx context.Context, id string) (string, bool) {
 	return s.repo.Get(ctx, id)
 }
 
+// ResolveWithDeleted resolves a short id and reports whether it was deleted.
 func (s *Shortener) ResolveWithDeleted(ctx context.Context, id string) (string, bool, bool) {
 	return s.repo.GetWithDeleted(ctx, id)
 }
 
+// ListUserURLs returns all URLs created by the given user.
 func (s *Shortener) ListUserURLs(ctx context.Context, userID string) ([]model.UserURL, error) {
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
@@ -198,6 +224,7 @@ func (s *Shortener) ListUserURLs(ctx context.Context, userID string) ([]model.Us
 	return s.repo.ListUserURLs(ctx, userID)
 }
 
+// EnqueueDelete queues an asynchronous delete request.
 func (s *Shortener) EnqueueDelete(userID string, ids []string) error {
 	userID = strings.TrimSpace(userID)
 	if userID == "" || len(ids) == 0 {
@@ -224,6 +251,7 @@ func (s *Shortener) EnqueueDelete(userID string, ids []string) error {
 	}
 }
 
+// StartDeleteWorker starts background processing of delete tasks.
 func (s *Shortener) StartDeleteWorker(ctx context.Context, batchSize int, flushEvery time.Duration, logError func(error)) func() {
 	if batchSize <= 0 {
 		batchSize = 64

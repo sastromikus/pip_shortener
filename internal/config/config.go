@@ -5,11 +5,14 @@ import (
 	"os"
 )
 
+// Config holds application configuration derived from flags and environment variables.
 type Config struct {
 	ServerAddr      string
 	BaseURL         string
 	FileStoragePath string
 	DatabaseDSN     string
+	AuditFile       string
+	AuditURL        string
 }
 
 const (
@@ -21,8 +24,11 @@ const (
 	envBaseURL         = "BASE_URL"
 	envFileStoragePath = "FILE_STORAGE_PATH"
 	envDatabaseDSN     = "DATABASE_DSN"
+	envAuditFile       = "AUDIT_FILE"
+	envAuditURL        = "AUDIT_URL"
 )
 
+// Parse reads flags and environment variables and returns the resulting configuration.
 func Parse() Config {
 	cfg := Config{
 		ServerAddr:      defaultServerAddr,
@@ -34,6 +40,8 @@ func Parse() Config {
 	var flagBase string
 	var flagFile string
 	var flagDSN string
+	var flagAuditFile string
+	var flagAuditURL string
 
 	flag.StringVar(&flagAddr, "a", "", "HTTP server address")
 	flag.StringVar(&flagBase, "b", "", "Base URL for short links")
@@ -41,6 +49,8 @@ func Parse() Config {
 	flag.StringVar(&flagDSN, "d", "", "Database DSN")
 	flag.StringVar(&flagDSN, "database-dsn", "", "Database DSN")
 	flag.StringVar(&flagDSN, "database_dsn", "", "Database DSN")
+	flag.StringVar(&flagAuditFile, "audit-file", "", "Audit log file path")
+	flag.StringVar(&flagAuditURL, "audit-url", "", "Audit receiver URL")
 	flag.Parse()
 
 	if flagAddr != "" {
@@ -55,6 +65,12 @@ func Parse() Config {
 	if flagDSN != "" {
 		cfg.DatabaseDSN = flagDSN
 	}
+	if flagAuditFile != "" {
+		cfg.AuditFile = flagAuditFile
+	}
+	if flagAuditURL != "" {
+		cfg.AuditURL = flagAuditURL
+	}
 
 	if v, ok := os.LookupEnv(envServerAddr); ok {
 		cfg.ServerAddr = v
@@ -67,6 +83,12 @@ func Parse() Config {
 	}
 	if v, ok := os.LookupEnv(envDatabaseDSN); ok {
 		cfg.DatabaseDSN = v
+	}
+	if v, ok := os.LookupEnv(envAuditFile); ok {
+		cfg.AuditFile = v
+	}
+	if v, ok := os.LookupEnv(envAuditURL); ok {
+		cfg.AuditURL = v
 	}
 
 	return cfg

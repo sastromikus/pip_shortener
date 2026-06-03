@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/sastromikus/pip_shortener/internal/audit"
 	"github.com/sastromikus/pip_shortener/internal/handler/middleware"
 	"github.com/sastromikus/pip_shortener/internal/service"
 )
@@ -18,7 +19,7 @@ type apiShortenResponse struct {
 	Result string `json:"result"`
 }
 
-func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
+func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, logger *slog.Logger, w http.ResponseWriter, r *http.Request, auditor *audit.Notifier) {
 	ct := r.Header.Get("Content-Type")
 	if ct == "" || !strings.HasPrefix(strings.ToLower(ct), "application/json") {
 		writeStatus(w, http.StatusBadRequest)
@@ -37,8 +38,14 @@ func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, logger *sl
 		return
 	}
 
+	raw := strings.TrimSpace(req.URL)
+	if raw == "" {
+		writeStatus(w, http.StatusBadRequest)
+		return
+	}
+
 	userID, _ := middleware.UserIDFromContext(r.Context())
-	id, existed, err := svc.ShortenForUserContext(r.Context(), req.URL, userID)
+	id, existed, err := svc.ShortenForUserContext(r.Context(), raw, userID)
 	if err != nil {
 		status := statusFromServiceError(err)
 		if status == http.StatusInternalServerError {
@@ -47,6 +54,8 @@ func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, logger *sl
 		writeStatus(w, status)
 		return
 	}
+
+	notifyAudit(logger, r, auditor, audit.Event{Action: "shorten", UserID: userID, URL: raw})
 
 	w.Header().Set("Content-Type", "application/json")
 	if existed {

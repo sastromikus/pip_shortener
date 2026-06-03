@@ -6,17 +6,20 @@ import (
 	"time"
 )
 
+// responseData stores response status and payload size for access logging.
 type responseData struct {
 	status int
 	size   int
 }
 
+// loggingResponseWriter captures response metadata while delegating writes to the original writer.
 type loggingResponseWriter struct {
 	http.ResponseWriter
 	responseData *responseData
 	wroteHeader  bool
 }
 
+// WriteHeader records the status code and writes it once to the underlying response.
 func (w *loggingResponseWriter) WriteHeader(statusCode int) {
 	if w.wroteHeader {
 		return
@@ -27,6 +30,7 @@ func (w *loggingResponseWriter) WriteHeader(statusCode int) {
 	w.ResponseWriter.WriteHeader(statusCode)
 }
 
+// Write records the number of bytes written and sends data to the underlying response.
 func (w *loggingResponseWriter) Write(b []byte) (int, error) {
 	if !w.wroteHeader {
 		w.WriteHeader(http.StatusOK)
@@ -38,6 +42,7 @@ func (w *loggingResponseWriter) Write(b []byte) (int, error) {
 	return size, err
 }
 
+// Logger logs request method, URI, status, size and duration.
 func Logger(logger *slog.Logger) func(http.Handler) http.Handler {
 	if logger == nil {
 		logger = slog.Default()

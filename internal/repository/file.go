@@ -13,6 +13,7 @@ import (
 	"github.com/sastromikus/pip_shortener/internal/model"
 )
 
+// FileRepository stores URLs in memory and persists them to files.
 type FileRepository struct {
 	path        string
 	usersPath   string
@@ -26,6 +27,7 @@ type fileRecord struct {
 	OriginalURL string `json:"original_url"`
 }
 
+// NewFileRepository creates a file-backed repository.
 func NewFileRepository(path string) (*FileRepository, error) {
 	if path == "" {
 		return nil, errors.New("empty file storage path")
@@ -51,18 +53,22 @@ func NewFileRepository(path string) (*FileRepository, error) {
 	return r, nil
 }
 
+// Get returns the original URL by short id.
 func (r *FileRepository) Get(ctx context.Context, id string) (string, bool) {
 	return r.mem.Get(ctx, id)
 }
 
+// GetWithDeleted returns the original URL and deletion state by short id.
 func (r *FileRepository) GetWithDeleted(ctx context.Context, id string) (string, bool, bool) {
 	return r.mem.GetWithDeleted(ctx, id)
 }
 
+// GetByOriginal returns the short id for an original URL.
 func (r *FileRepository) GetByOriginal(ctx context.Context, original string) (string, bool) {
 	return r.mem.GetByOriginal(ctx, original)
 }
 
+// PutIfAbsent stores a URL only when neither short id nor original URL exists.
 func (r *FileRepository) PutIfAbsent(ctx context.Context, id string, original string) (bool, error) {
 	created, err := r.mem.PutIfAbsent(ctx, id, original)
 	if err != nil {
@@ -80,6 +86,7 @@ func (r *FileRepository) PutIfAbsent(ctx context.Context, id string, original st
 	return true, nil
 }
 
+// PutBatchIfAbsent stores multiple URL records when they are absent.
 func (r *FileRepository) PutBatchIfAbsent(ctx context.Context, items []model.URLItem) error {
 	createdIDs := make([]string, 0, len(items))
 
@@ -112,15 +119,18 @@ func (r *FileRepository) Put(id string, original string) {
 	_, _ = r.PutIfAbsent(context.Background(), id, original)
 }
 
+// Exists reports whether a short id is already stored.
 func (r *FileRepository) Exists(id string) bool {
 	_, ok := r.mem.Get(context.Background(), id)
 	return ok
 }
 
+// AddUserURL associates a short id with a user.
 func (r *FileRepository) AddUserURL(ctx context.Context, userID, shortID string) error {
 	return r.AddUserURLs(ctx, userID, []string{shortID})
 }
 
+// AddUserURLs associates multiple short ids with a user.
 func (r *FileRepository) AddUserURLs(ctx context.Context, userID string, shortIDs []string) error {
 	if err := r.mem.AddUserURLs(ctx, userID, shortIDs); err != nil {
 		return err
@@ -129,10 +139,12 @@ func (r *FileRepository) AddUserURLs(ctx context.Context, userID string, shortID
 	return r.saveUsers()
 }
 
+// ListUserURLs returns all non-deleted URLs owned by a user.
 func (r *FileRepository) ListUserURLs(ctx context.Context, userID string) ([]model.UserURL, error) {
 	return r.mem.ListUserURLs(ctx, userID)
 }
 
+// MarkDeleted marks user-owned URLs as deleted.
 func (r *FileRepository) MarkDeleted(ctx context.Context, userID string, ids []string) error {
 	if err := r.mem.MarkDeleted(ctx, userID, ids); err != nil {
 		return err

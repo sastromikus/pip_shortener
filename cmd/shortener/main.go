@@ -13,6 +13,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/sastromikus/pip_shortener/internal/audit"
 	"github.com/sastromikus/pip_shortener/internal/config"
 	"github.com/sastromikus/pip_shortener/internal/handler"
 	"github.com/sastromikus/pip_shortener/internal/repository"
@@ -34,6 +35,24 @@ func run() error {
 		repo service.URLRepository
 		db   *sql.DB
 	)
+
+	observers := make([]audit.Observer, 0, 2)
+	if cfg.AuditFile != "" {
+		fileObserver, err := audit.NewFileObserver(cfg.AuditFile)
+		if err != nil {
+			return fmt.Errorf("audit file observer: %w", err)
+		}
+		observers = append(observers, fileObserver)
+	}
+	if cfg.AuditURL != "" {
+		observers = append(observers, audit.NewHTTPObserver(cfg.AuditURL))
+	}
+	auditor := audit.NewNotifier(observers...)
+	defer func() {
+		if err := auditor.Close(); err != nil {
+			logger.Error("audit shutdown failed", "error", err)
+		}
+	}()
 
 	if cfg.DatabaseDSN != "" {
 		dbCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -59,6 +78,7 @@ func run() error {
 	}
 
 	svc := service.NewShortener(repo)
+
 	workerCtx, workerCancel := context.WithCancel(context.Background())
 	defer workerCancel()
 
@@ -66,7 +86,8 @@ func run() error {
 		logger.Error("delete worker failed", "error", err)
 	})
 
-	router := handler.NewRouter(svc, cfg.BaseURL, logger, db)
+	router := handler.NewRouter(svc, cfg.BaseURL, logger, db, auditor)
+
 	srv := &http.Server{
 		Addr:    cfg.ServerAddr,
 		Handler: router,
