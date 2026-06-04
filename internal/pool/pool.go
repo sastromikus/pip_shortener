@@ -2,14 +2,17 @@ package pool
 
 import "sync"
 
+// Resettable is implemented by objects that can reset their state.
 type Resettable interface {
 	Reset()
 }
 
+// Pool stores reusable resettable objects.
 type Pool[T Resettable] struct {
 	p sync.Pool
 }
 
+// New creates a new Pool.
 func New[T Resettable](newFn func() T) *Pool[T] {
 	return &Pool[T]{
 		p: sync.Pool{
@@ -20,6 +23,7 @@ func New[T Resettable](newFn func() T) *Pool[T] {
 	}
 }
 
+// Get returns an object from the pool.
 func (pl *Pool[T]) Get() T {
 	v := pl.p.Get()
 	if v == nil {
@@ -29,12 +33,8 @@ func (pl *Pool[T]) Get() T {
 	return v.(T)
 }
 
+// Put resets obj and returns it to the pool.
 func (pl *Pool[T]) Put(obj T) {
-	var zero T
-	if any(obj) == any(zero) {
-		return
-	}
-
 	obj.Reset()
 	pl.p.Put(obj)
 }

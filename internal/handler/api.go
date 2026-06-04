@@ -55,7 +55,7 @@ func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, logger *sl
 		return
 	}
 
-	notifyAudit(logger, r, auditor, audit.Event{Action: "shorten", UserID: userID, URL: raw})
+	notifyAudit(logger, auditor, audit.Event{Action: "shorten", UserID: userID, URL: raw})
 
 	w.Header().Set("Content-Type", "application/json")
 	if existed {

@@ -3,25 +3,21 @@ package main
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/sastromikus/pip_shortener/internal/audit"
 	"github.com/sastromikus/pip_shortener/internal/config"
 	"github.com/sastromikus/pip_shortener/internal/handler"
 	"github.com/sastromikus/pip_shortener/internal/repository"
 	"github.com/sastromikus/pip_shortener/internal/service"
-
-	"github.com/sirupsen/logrus"
-
-	_ "github.com/lib/pq"
 )
 
 var buildVersion string
@@ -49,103 +45,59 @@ func printBuildInfo() {
 	fmt.Printf("Build commit: %s\n", c)
 }
 
-func migrationPaths() ([]string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, err
-	}
-	cwdMigrations := filepath.Join(cwd, "migrations")
-
-	exe, err := os.Executable()
-	if err != nil {
-		return []string{cwdMigrations}, nil
-	}
-	exeDir := filepath.Dir(exe)
-
-	exeMigrations1 := filepath.Join(exeDir, "migrations")
-	exeMigrations2 := filepath.Clean(filepath.Join(exeDir, "..", "..", "migrations"))
-
-	return []string{cwdMigrations, exeMigrations1, exeMigrations2}, nil
-}
-
-func runMigrations(db *sql.DB) error {
-	dirs, err := migrationPaths()
-	if err != nil {
-		return fmt.Errorf("migrations: %w", err)
-	}
-
-	files := []string{
-		"0001_create_urls.sql",
-		"0002_unique_original.sql",
-		"0003_create_user_urls.sql",
-		"0004_add_is_deleted.sql",
-	}
-
-	var lastErr error
-	for _, dir := range dirs {
-		ok := true
-		for _, f := range files {
-			p := filepath.Join(dir, f)
-			if err := repository.RunSQLMigration(db, p); err != nil {
-				lastErr = err
-				ok = false
-				break
-			}
-		}
-		if ok {
-			return nil
-		}
-	}
-
-	if lastErr == nil {
-		lastErr = errors.New("no migrations were applied")
-	}
-
-	return fmt.Errorf("migrations: %w", lastErr)
-}
-
 func main() {
 	printBuildInfo()
 
-	var repo repository.URLRepository
-	var db *sql.DB
-	var observers []audit.Observer
+	if err := run(); err != nil {
+		slog.Error("application failed", "error", err)
+		os.Exit(1)
+	}
+}
 
+func run() error {
 	cfg := config.Parse()
-	logger := logrus.New()
-	logger.SetLevel(logrus.InfoLevel)
+	logger := slog.Default()
 
+	var (
+		repo service.URLRepository
+		db   *sql.DB
+	)
+
+	observers := make([]audit.Observer, 0, 2)
 	if cfg.AuditFile != "" {
-		observers = append(observers, audit.NewFileObserver(cfg.AuditFile))
+		fileObserver, err := audit.NewFileObserver(cfg.AuditFile)
+		if err != nil {
+			return fmt.Errorf("audit file observer: %w", err)
+		}
+		observers = append(observers, fileObserver)
 	}
 	if cfg.AuditURL != "" {
 		observers = append(observers, audit.NewHTTPObserver(cfg.AuditURL))
 	}
 	auditor := audit.NewNotifier(observers...)
+	defer func() {
+		if err := auditor.Close(); err != nil {
+			logger.Error("audit shutdown failed", "error", err)
+		}
+	}()
 
 	if cfg.DatabaseDSN != "" {
-		d, err := sql.Open("postgres", cfg.DatabaseDSN)
-		if err != nil {
-			log.Fatalf("db open: %v", err)
-		}
-		db = d
-
-		if err := runMigrations(db); err != nil {
-			log.Fatal(err)
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		dbCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		if err := db.PingContext(ctx); err != nil {
-			log.Printf("db ping failed: %v", err)
+
+		postgresDB, postgresRepo, err := repository.NewPostgresStorage(dbCtx, cfg.DatabaseDSN)
+		if err != nil {
+			return err
 		}
 
-		repo = repository.NewPostgresRepository(db)
+		db = postgresDB
+		defer db.Close()
 
+		repo = postgresRepo
 	} else if cfg.FileStoragePath != "" {
 		fileRepo, err := repository.NewFileRepository(cfg.FileStoragePath)
 		if err != nil {
-			log.Fatalf("file repository: %v", err)
+			return fmt.Errorf("file repository: %w", err)
 		}
 		repo = fileRepo
 	} else {
@@ -153,7 +105,14 @@ func main() {
 	}
 
 	svc := service.NewShortener(repo)
-	svc.StartDeleteWorker(128, 500*time.Millisecond)
+
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	defer workerCancel()
+
+	waitDeleteWorker := svc.StartDeleteWorker(workerCtx, 128, 500*time.Millisecond, func(err error) {
+		logger.Error("delete worker failed", "error", err)
+	})
+
 	router := handler.NewRouter(svc, cfg.BaseURL, logger, db, auditor)
 
 	srv := &http.Server{
@@ -161,24 +120,36 @@ func main() {
 		Handler: router,
 	}
 
+	serverErr := make(chan error, 1)
 	go func() {
-		log.Printf("listening on http://%s\n", cfg.ServerAddr)
+		logger.Info("listening", "addr", cfg.ServerAddr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("error: %v", err)
+			serverErr <- err
+			return
 		}
+		serverErr <- nil
 	}()
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if db != nil {
-		_ = db.Close()
+	select {
+	case <-ctx.Done():
+	case err := <-serverErr:
+		return err
 	}
 
-	_ = srv.Shutdown(ctx)
-	log.Println("shutdown")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		logger.Error("server shutdown error", "error", err)
+		return err
+	}
+
+	workerCancel()
+	waitDeleteWorker()
+
+	logger.Info("shutdown")
+	return nil
 }

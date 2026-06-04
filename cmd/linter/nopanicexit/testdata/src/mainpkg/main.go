@@ -1,17 +1,17 @@
 package main
 
 import (
-	"log"
+	logger "log"
 	"os"
 )
 
 func main() {
-	log.Fatal("ok here")
+	logger.Fatal("ok here")
 	os.Exit(0)
 }
 
 func helper() {
-	log.Fatal("not ok")
-	os.Exit(2)
-	panic("x")
+	logger.Fatal("not ok") // want "log.Fatal is allowed only in main.main"
+	os.Exit(2)             // want "os.Exit is allowed only in main.main"
+	panic("x")             // want "panic usage is forbidden"
 }
