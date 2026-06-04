@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// gzipResponseWriter wraps http.ResponseWriter and gzip-compresses response bodies when enabled.
 type gzipResponseWriter struct {
 	http.ResponseWriter
 
@@ -17,6 +18,7 @@ type gzipResponseWriter struct {
 	status      int
 }
 
+// WriteHeader writes the response status and prepares gzip compression when the content type is supported.
 func (w *gzipResponseWriter) WriteHeader(code int) {
 	if w.wroteHeader {
 		return
@@ -41,6 +43,7 @@ func (w *gzipResponseWriter) WriteHeader(code int) {
 	w.ResponseWriter.WriteHeader(code)
 }
 
+// Write writes response data through the selected plain or gzip writer.
 func (w *gzipResponseWriter) Write(p []byte) (int, error) {
 	if !w.wroteHeader {
 		w.WriteHeader(http.StatusOK)
@@ -49,6 +52,7 @@ func (w *gzipResponseWriter) Write(p []byte) (int, error) {
 	return w.writer.Write(p)
 }
 
+// Close flushes and closes the gzip writer when it was created.
 func (w *gzipResponseWriter) Close() error {
 	if w.gw != nil {
 		return w.gw.Close()
@@ -60,10 +64,10 @@ func (w *gzipResponseWriter) Close() error {
 func shouldCompressContentType(ct string) bool {
 	ct = strings.ToLower(ct)
 
-	return strings.HasPrefix(ct, "application/json") || strings.HasPrefix(ct, "text/html")
+	return strings.HasPrefix(ct, "application/json") || strings.HasPrefix(ct, "text/html") || strings.HasPrefix(ct, "text/plain")
 }
 
-// Gzip enables gzip support for requests and responses where applicable.
+// Gzip enables gzip decoding for requests and gzip encoding for supported responses.
 func Gzip() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

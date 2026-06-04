@@ -16,16 +16,16 @@ type Config struct {
 }
 
 const (
-	defaultServerAddr = "localhost:8080"
-	defaultBaseURL    = "http://localhost:8080"
-
-	envServerAddr = "SERVER_ADDRESS"
-	envBaseURL    = "BASE_URL"
-
+	defaultServerAddr      = "localhost:8080"
+	defaultBaseURL         = "http://localhost:8080"
 	defaultFileStoragePath = "storage.json"
-	envFileStoragePath     = "FILE_STORAGE_PATH"
 
-	envDatabaseDSN = "DATABASE_DSN"
+	envServerAddr      = "SERVER_ADDRESS"
+	envBaseURL         = "BASE_URL"
+	envFileStoragePath = "FILE_STORAGE_PATH"
+	envDatabaseDSN     = "DATABASE_DSN"
+	envAuditFile       = "AUDIT_FILE"
+	envAuditURL        = "AUDIT_URL"
 )
 
 // Parse reads flags and environment variables and returns the resulting configuration.
@@ -43,9 +43,9 @@ func Parse() Config {
 	var flagAuditFile string
 	var flagAuditURL string
 
-	flag.StringVar(&flagFile, "f", "", "File storage path")
 	flag.StringVar(&flagAddr, "a", "", "HTTP server address")
 	flag.StringVar(&flagBase, "b", "", "Base URL for short links")
+	flag.StringVar(&flagFile, "f", "", "File storage path")
 	flag.StringVar(&flagDSN, "d", "", "Database DSN")
 	flag.StringVar(&flagDSN, "database-dsn", "", "Database DSN")
 	flag.StringVar(&flagDSN, "database_dsn", "", "Database DSN")
@@ -72,25 +72,22 @@ func Parse() Config {
 		cfg.AuditURL = flagAuditURL
 	}
 
-	if v := os.Getenv("DATABASE_DSN"); v != "" {
-		cfg.DatabaseDSN = v
-	}
-	if v := os.Getenv(envServerAddr); v != "" {
+	if v, ok := os.LookupEnv(envServerAddr); ok {
 		cfg.ServerAddr = v
 	}
-	if v := os.Getenv(envBaseURL); v != "" {
+	if v, ok := os.LookupEnv(envBaseURL); ok {
 		cfg.BaseURL = v
 	}
-	if v := os.Getenv(envFileStoragePath); v != "" {
+	if v, ok := os.LookupEnv(envFileStoragePath); ok {
 		cfg.FileStoragePath = v
 	}
-	if v := os.Getenv(envDatabaseDSN); v != "" {
+	if v, ok := os.LookupEnv(envDatabaseDSN); ok {
 		cfg.DatabaseDSN = v
 	}
-	if v := os.Getenv("AUDIT_FILE"); v != "" {
+	if v, ok := os.LookupEnv(envAuditFile); ok {
 		cfg.AuditFile = v
 	}
-	if v := os.Getenv("AUDIT_URL"); v != "" {
+	if v, ok := os.LookupEnv(envAuditURL); ok {
 		cfg.AuditURL = v
 	}
 

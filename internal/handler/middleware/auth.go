@@ -23,15 +23,15 @@ const (
 	ctxBadCookieKey
 )
 
-// UserIDFromContext returns user id stored in request context by Auth middleware.
+// UserIDFromContext extracts a verified user id from request context.
 func UserIDFromContext(ctx context.Context) (string, bool) {
 	v := ctx.Value(ctxUserIDKey)
-	s, _ := v.(string)
+	s, ok := v.(string)
 
-	return s, s != ""
+	return s, ok
 }
 
-// BadCookieNoID reports whether a request contained a user_id cookie without a valid user id.
+// BadCookieNoID reports whether the request contained an invalid user cookie.
 func BadCookieNoID(ctx context.Context) bool {
 	v := ctx.Value(ctxBadCookieKey)
 	b, _ := v.(bool)
@@ -64,9 +64,7 @@ func Auth() func(http.Handler) http.Handler {
 					return
 				}
 
-				newUID := newUserID()
-				http.SetCookie(w, buildCookie(newUID, secret))
-				ctx := context.WithValue(r.Context(), ctxUserIDKey, newUID)
+				ctx := context.WithValue(r.Context(), ctxBadCookieKey, true)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
@@ -94,38 +92,25 @@ func buildCookie(uid string, secret []byte) *http.Cookie {
 func signCookie(uid string, secret []byte) string {
 	mac := hmac.New(sha256.New, secret)
 	_, _ = mac.Write([]byte(uid))
-	sum := mac.Sum(nil)
+	sig := hex.EncodeToString(mac.Sum(nil))
 
-	out := make([]byte, 0, len(uid)+1+hex.EncodedLen(len(sum)))
-	out = append(out, uid...)
-	out = append(out, ':')
-
-	dst := make([]byte, hex.EncodedLen(len(sum)))
-	hex.Encode(dst, sum)
-	out = append(out, dst...)
-
-	return string(out)
+	return uid + ":" + sig
 }
 
 func verifyCookie(val string, secret []byte) (string, bool) {
-	uid, sigHex, ok := strings.Cut(val, ":")
-	if !ok || uid == "" || sigHex == "" {
+	parts := strings.Split(val, ":")
+	if len(parts) != 2 {
+		return "", false
+	}
+	uid := parts[0]
+	sig := parts[1]
+	if uid == "" || sig == "" {
 		return "", false
 	}
 
-	sig, err := hex.DecodeString(sigHex)
-	if err != nil {
-		return "", false
-	}
+	want := signCookie(uid, secret)
 
-	mac := hmac.New(sha256.New, secret)
-	_, _ = mac.Write([]byte(uid))
-	sum := mac.Sum(nil)
-
-	if !hmac.Equal(sum, sig) {
-		return "", false
-	}
-	return uid, true
+	return uid, hmac.Equal([]byte(want), []byte(uid+":"+sig))
 }
 
 func newUserID() string {

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -18,48 +19,43 @@ type apiShortenResponse struct {
 	Result string `json:"result"`
 }
 
-func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, w http.ResponseWriter, r *http.Request, auditor *audit.Notifier) {
+func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, logger *slog.Logger, w http.ResponseWriter, r *http.Request, auditor *audit.Notifier) {
 	ct := r.Header.Get("Content-Type")
 	if ct == "" || !strings.HasPrefix(strings.ToLower(ct), "application/json") {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
-	body, err := readBody(r, maxPOSTBody)
+	body, err := readBody(w, r, maxPOSTBody)
 	if err != nil {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
 	var req apiShortenRequest
 	if err := json.Unmarshal(body, &req); err != nil {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
 	raw := strings.TrimSpace(req.URL)
 	if raw == "" {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
 	userID, _ := middleware.UserIDFromContext(r.Context())
-	id, existed, err := svc.ShortenForUser(raw, userID)
+	id, existed, err := svc.ShortenForUserContext(r.Context(), raw, userID)
 	if err != nil {
-		badRequest(w)
+		status := statusFromServiceError(err)
+		if status == http.StatusInternalServerError {
+			logger.Error("api shorten failed", "error", err)
+		}
+		writeStatus(w, status)
 		return
 	}
 
-	if auditor != nil {
-		auditor.NotifyAllAsync(r.Context(), audit.Event{
-			Action: "shorten",
-			UserID: userID,
-			URL:    raw,
-		})
-	}
-
-	shortURL := strings.TrimRight(baseURL, "/") + "/" + id
-	resp := apiShortenResponse{Result: shortURL}
+	notifyAudit(logger, r, auditor, audit.Event{Action: "shorten", UserID: userID, URL: raw})
 
 	w.Header().Set("Content-Type", "application/json")
 	if existed {
@@ -67,5 +63,8 @@ func handleAPIPostShortenJSON(svc *service.Shortener, baseURL string, w http.Res
 	} else {
 		w.WriteHeader(http.StatusCreated)
 	}
-	_ = json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(apiShortenResponse{Result: joinURL(baseURL, id)}); err != nil {
+		internalServerError(logger, w, "encode api shorten response", err)
+		return
+	}
 }

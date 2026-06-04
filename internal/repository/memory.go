@@ -1,66 +1,211 @@
 package repository
 
-import "sync"
+import (
+	"context"
+	"sort"
+	"sync"
 
-// URLRepository defines a storage backend for short URL mappings.
-type URLRepository interface {
-	Get(id string) (string, bool)
-	Put(id string, original string)
-	Exists(id string) bool
-}
+	"github.com/sastromikus/pip_shortener/internal/model"
+)
 
-// MemoryRepository stores URL mappings in memory.
+// MemoryRepository stores URLs in process memory.
 type MemoryRepository struct {
-	mu   sync.RWMutex
-	data map[string]string
-	user map[string]map[string]struct{}
+	mu       sync.RWMutex
+	data     map[string]string
+	original map[string]string
+	user     map[string]map[string]struct{}
+	deleted  map[string]bool
 }
 
-// NewMemoryRepository creates a new in-memory repository.
+// NewMemoryRepository creates an empty in-memory repository.
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
-		data: make(map[string]string),
+		data:     make(map[string]string),
+		original: make(map[string]string),
+		user:     make(map[string]map[string]struct{}),
+		deleted:  make(map[string]bool),
 	}
 }
 
-func (r *MemoryRepository) Get(id string) (string, bool) {
+// Get returns the original URL by short id.
+func (r *MemoryRepository) Get(_ context.Context, id string) (string, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+
 	v, ok := r.data[id]
 	return v, ok
 }
 
-func (r *MemoryRepository) Put(id string, original string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.data[id] = original
-}
-
-func (r *MemoryRepository) Exists(id string) bool {
+// GetWithDeleted returns the original URL and deletion state by short id.
+func (r *MemoryRepository) GetWithDeleted(_ context.Context, id string) (string, bool, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	_, ok := r.data[id]
-	return ok
+
+	v, ok := r.data[id]
+	if !ok {
+		return "", false, false
+	}
+
+	return v, true, r.deleted[id]
 }
 
-func (r *MemoryRepository) AddUserURL(userID, shortID string) error {
+// GetByOriginal returns the short id for an original URL.
+func (r *MemoryRepository) GetByOriginal(_ context.Context, original string) (string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	id, ok := r.original[original]
+	return id, ok
+}
+
+// PutIfAbsent stores a URL only when neither short id nor original URL exists.
+func (r *MemoryRepository) PutIfAbsent(_ context.Context, id string, original string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if r.user == nil {
-		r.user = make(map[string]map[string]struct{})
+	if _, ok := r.data[id]; ok {
+		return false, nil
 	}
-	set, ok := r.user[userID]
-	if !ok {
-		set = make(map[string]struct{})
-		r.user[userID] = set
+	if _, ok := r.original[original]; ok {
+		return false, nil
 	}
-	set[shortID] = struct{}{}
+
+	r.data[id] = original
+	r.original[original] = id
+	return true, nil
+}
+
+// PutBatchIfAbsent stores multiple URL records when they are absent.
+func (r *MemoryRepository) PutBatchIfAbsent(_ context.Context, items []model.URLItem) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for _, item := range items {
+		if _, ok := r.data[item.ID]; ok {
+			continue
+		}
+		if _, ok := r.original[item.Original]; ok {
+			continue
+		}
+
+		r.data[item.ID] = item.Original
+		r.original[item.Original] = item.ID
+	}
 
 	return nil
 }
 
-func (r *MemoryRepository) ListUserURLs(userID string) ([]UserURL, error) {
+// Put is kept for tests and simple compatibility. Business code should prefer PutIfAbsent.
+func (r *MemoryRepository) Put(id string, original string) {
+	_, _ = r.PutIfAbsent(context.Background(), id, original)
+}
+
+// Exists reports whether a short id is already stored.
+func (r *MemoryRepository) Exists(id string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	_, ok := r.data[id]
+	return ok
+}
+
+// Delete removes a short id from memory.
+func (r *MemoryRepository) Delete(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if original, ok := r.data[id]; ok {
+		delete(r.original, original)
+	}
+	delete(r.data, id)
+	delete(r.deleted, id)
+	for _, set := range r.user {
+		delete(set, id)
+	}
+}
+
+// Items returns a copy of stored URL records.
+func (r *MemoryRepository) Items() map[string]string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	out := make(map[string]string, len(r.data))
+	for id, original := range r.data {
+		out[id] = original
+	}
+
+	return out
+}
+
+// UserItems returns a copy of user-to-short-id links.
+func (r *MemoryRepository) UserItems() map[string][]string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	out := make(map[string][]string, len(r.user))
+	for userID, set := range r.user {
+		ids := make([]string, 0, len(set))
+		for id := range set {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		out[userID] = ids
+	}
+
+	return out
+}
+
+// DeletedItems returns ids marked as deleted.
+func (r *MemoryRepository) DeletedItems() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	ids := make([]string, 0, len(r.deleted))
+	for id, deleted := range r.deleted {
+		if deleted {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+
+	return ids
+}
+
+// AddUserURL associates a short id with a user.
+func (r *MemoryRepository) AddUserURL(ctx context.Context, userID, shortID string) error {
+	return r.AddUserURLs(ctx, userID, []string{shortID})
+}
+
+// AddUserURLs associates multiple short ids with a user.
+func (r *MemoryRepository) AddUserURLs(_ context.Context, userID string, shortIDs []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if userID == "" || len(shortIDs) == 0 {
+		return nil
+	}
+
+	set := r.user[userID]
+	if set == nil {
+		set = make(map[string]struct{})
+		r.user[userID] = set
+	}
+	for _, id := range shortIDs {
+		if id != "" {
+			set[id] = struct{}{}
+		}
+	}
+
+	return nil
+}
+
+// LoadUserURL restores a user-to-short-id link from persistent storage.
+func (r *MemoryRepository) LoadUserURL(userID, shortID string) {
+	_ = r.AddUserURL(context.Background(), userID, shortID)
+}
+
+// ListUserURLs returns all non-deleted URLs owned by a user.
+func (r *MemoryRepository) ListUserURLs(_ context.Context, userID string) ([]model.UserURL, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
@@ -69,14 +214,48 @@ func (r *MemoryRepository) ListUserURLs(userID string) ([]UserURL, error) {
 		return nil, nil
 	}
 
-	out := make([]UserURL, 0, len(set))
-	for shortID := range set {
-		orig, ok := r.data[shortID]
-		if !ok {
+	ids := make([]string, 0, len(set))
+	for id := range set {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	out := make([]model.UserURL, 0, len(ids))
+	for _, id := range ids {
+		original, ok := r.data[id]
+		if !ok || r.deleted[id] {
 			continue
 		}
-		out = append(out, UserURL{ShortID: shortID, Original: orig})
+		out = append(out, model.UserURL{ShortID: id, Original: original})
 	}
 
 	return out, nil
+}
+
+// MarkDeleted marks user-owned URLs as deleted.
+func (r *MemoryRepository) MarkDeleted(_ context.Context, userID string, ids []string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	set := r.user[userID]
+	if len(set) == 0 {
+		return nil
+	}
+	for _, id := range ids {
+		if _, ok := set[id]; ok {
+			r.deleted[id] = true
+		}
+	}
+
+	return nil
+}
+
+// LoadDeleted restores a deleted short id from persistent storage.
+func (r *MemoryRepository) LoadDeleted(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if id != "" {
+		r.deleted[id] = true
+	}
 }
