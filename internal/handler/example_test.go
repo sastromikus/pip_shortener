@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,16 +12,12 @@ import (
 	"github.com/sastromikus/pip_shortener/internal/handler"
 	"github.com/sastromikus/pip_shortener/internal/repository"
 	"github.com/sastromikus/pip_shortener/internal/service"
-	"github.com/sirupsen/logrus"
 )
 
 func Example_postTextPlain() {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
-
-	logger := logrus.New()
-	logger.SetOutput(io.Discard)
-	logger.SetLevel(logrus.InfoLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	h := handler.NewRouter(svc, "http://example", logger, nil, nil)
 	ts := httptest.NewServer(h)
@@ -57,10 +54,7 @@ func Example_postTextPlain() {
 func Example_postJSON() {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
-
-	logger := logrus.New()
-	logger.SetOutput(io.Discard)
-	logger.SetLevel(logrus.InfoLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	h := handler.NewRouter(svc, "http://example", logger, nil, nil)
 	ts := httptest.NewServer(h)

@@ -180,9 +180,14 @@ func generateResetMethod(buf *bytes.Buffer, st *targetStruct) {
 
 	for _, fld := range st.Fields {
 		if len(fld.Names) == 0 {
-			emitResetForType(buf, "x", fld.Type)
+			name, ok := embeddedFieldName(fld.Type)
+			if !ok {
+				continue
+			}
+			emitResetForType(buf, "x."+name, fld.Type)
 			continue
 		}
+
 		for _, name := range fld.Names {
 			emitResetForType(buf, "x."+name.Name, fld.Type)
 		}
@@ -191,50 +196,82 @@ func generateResetMethod(buf *bytes.Buffer, st *targetStruct) {
 	fmt.Fprintf(buf, "}\n")
 }
 
+func embeddedFieldName(t ast.Expr) (string, bool) {
+	switch tt := t.(type) {
+	case *ast.Ident:
+		return tt.Name, true
+	case *ast.SelectorExpr:
+		return tt.Sel.Name, true
+	case *ast.StarExpr:
+		return embeddedFieldName(tt.X)
+	default:
+		return "", false
+	}
+}
+
 func emitResetForType(buf *bytes.Buffer, sel string, t ast.Expr) {
 	switch tt := t.(type) {
 	case *ast.Ident:
-		fmt.Fprintf(buf, "\t%s = %s\n", sel, zeroValue(tt.Name))
+		if z, ok := basicZeroValue(tt.Name); ok {
+			fmt.Fprintf(buf, "\t%s = %s\n", sel, z)
+			return
+		}
+		emitResettableOrZero(buf, sel, t)
 	case *ast.ArrayType:
 		if tt.Len == nil {
 			fmt.Fprintf(buf, "\t%s = %s[:0]\n", sel, sel)
 			return
 		}
-		fmt.Fprintf(buf, "\t%s = %s\n", sel, zeroValueExpr(t))
+		emitZeroAssignment(buf, sel, t)
 	case *ast.MapType:
-		fmt.Fprintf(buf, "\tif %s != nil {\n\t\tclear(%s)\n\t}\n", sel, sel)
+		fmt.Fprintf(buf, "\tclear(%s)\n", sel)
 	case *ast.StarExpr:
 		fmt.Fprintf(buf, "\tif %s != nil {\n", sel)
-		emitResetForType(buf, "*"+sel, tt.X)
+		fmt.Fprintf(buf, "\t\tif r, ok := any(%s).(interface{ Reset() }); ok {\n", sel)
+		fmt.Fprintf(buf, "\t\t\tr.Reset()\n")
+		fmt.Fprintf(buf, "\t\t} else {\n")
+		emitResetForType(buf, "(*"+sel+")", tt.X)
+		fmt.Fprintf(buf, "\t\t}\n")
 		fmt.Fprintf(buf, "\t}\n")
 	case *ast.StructType:
-		fmt.Fprintf(buf, "\t%s = %s\n", sel, zeroValueExpr(t))
+		emitZeroAssignment(buf, sel, t)
 	default:
-		fmt.Fprintf(buf, "\tif r, ok := any(%s).(interface{ Reset() }); ok {\n\t\tr.Reset()\n\t}\n", sel)
+		emitResettableOrZero(buf, sel, t)
 	}
 }
 
-func zeroValue(typeName string) string {
+func emitResettableOrZero(buf *bytes.Buffer, sel string, t ast.Expr) {
+	fmt.Fprintf(buf, "\tif r, ok := any(&%s).(interface{ Reset() }); ok {\n", sel)
+	fmt.Fprintf(buf, "\t\tr.Reset()\n")
+	fmt.Fprintf(buf, "\t} else {\n")
+	emitZeroAssignment(buf, sel, t)
+	fmt.Fprintf(buf, "\t}\n")
+}
+
+func emitZeroAssignment(buf *bytes.Buffer, sel string, t ast.Expr) {
+	fmt.Fprintf(buf, "\t{\n")
+	fmt.Fprintf(buf, "\t\tvar zero %s\n", exprString(t))
+	fmt.Fprintf(buf, "\t\t%s = zero\n", sel)
+	fmt.Fprintf(buf, "\t}\n")
+}
+
+func basicZeroValue(typeName string) (string, bool) {
 	switch typeName {
 	case "string":
-		return `""`
+		return `""`, true
 	case "bool":
-		return "false"
+		return "false", true
 	case "int", "int8", "int16", "int32", "int64":
-		return "0"
+		return "0", true
 	case "uint", "uint8", "uint16", "uint32", "uint64", "uintptr":
-		return "0"
+		return "0", true
 	case "float32", "float64":
-		return "0"
+		return "0", true
 	case "complex64", "complex128":
-		return "0"
+		return "0", true
 	default:
-		return fmt.Sprintf("%s{}", typeName)
+		return "", false
 	}
-}
-
-func zeroValueExpr(t ast.Expr) string {
-	return exprString(t) + "{}"
 }
 
 func exprString(e ast.Expr) string {

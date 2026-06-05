@@ -1,53 +1,71 @@
 package middleware
 
 import (
+	"log/slog"
 	"net/http"
 	"time"
-
-	"github.com/sirupsen/logrus"
 )
 
-// LogResponseWriter wraps http.ResponseWriter and captures response status and size.
-type LogResponseWriter struct {
-	http.ResponseWriter
+// responseData stores response status and payload size for access logging.
+type responseData struct {
 	status int
 	size   int
 }
 
-func (w *LogResponseWriter) WriteHeader(code int) {
-	w.status = code
-	w.ResponseWriter.WriteHeader(code)
+// loggingResponseWriter captures response metadata while delegating writes to the original writer.
+type loggingResponseWriter struct {
+	http.ResponseWriter
+	responseData *responseData
+	wroteHeader  bool
 }
 
-func (w *LogResponseWriter) Write(p []byte) (int, error) {
-	n, err := w.ResponseWriter.Write(p)
-	w.size += n
-	return n, err
-}
-
-// Logger logs request method, URI, duration, status code and response size.
-// If logger is nil, middleware acts as a no-op.
-func Logger(logger *logrus.Logger) func(http.Handler) http.Handler {
-	if logger == nil {
-		return func(next http.Handler) http.Handler { return next }
+// WriteHeader records the status code and writes it once to the underlying response.
+func (w *loggingResponseWriter) WriteHeader(statusCode int) {
+	if w.wroteHeader {
+		return
 	}
 
-	logger.SetLevel(logrus.InfoLevel)
+	w.responseData.status = statusCode
+	w.wroteHeader = true
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+// Write records the number of bytes written and sends data to the underlying response.
+func (w *loggingResponseWriter) Write(b []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+
+	size, err := w.ResponseWriter.Write(b)
+	w.responseData.size += size
+
+	return size, err
+}
+
+// Logger logs request method, URI, status, size and duration.
+func Logger(logger *slog.Logger) func(http.Handler) http.Handler {
+	if logger == nil {
+		logger = slog.Default()
+	}
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
-
-			lw := &LogResponseWriter{ResponseWriter: w}
-			next.ServeHTTP(lw, r)
-
-			if lw.status == 0 {
-				lw.status = http.StatusOK
+			data := &responseData{status: http.StatusOK}
+			lw := &loggingResponseWriter{
+				ResponseWriter: w,
+				responseData:   data,
 			}
 
-			logger.Infof(
-				"request method=%s uri=%s duration=%s status=%d size=%d",
-				r.Method, r.RequestURI, time.Since(start).String(), lw.status, lw.size,
+			next.ServeHTTP(lw, r)
+
+			logger.Info(
+				"request",
+				"method", r.Method,
+				"uri", r.RequestURI,
+				"status", data.status,
+				"size", data.size,
+				"duration", time.Since(start),
 			)
 		})
 	}
