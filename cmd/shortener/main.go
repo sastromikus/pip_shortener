@@ -137,22 +137,27 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
 
+	var runErr error
 	select {
 	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		runErr = srv.Shutdown(shutdownCtx)
+		cancel()
+		if runErr != nil {
+			logger.Error("server shutdown error", "error", runErr)
+		}
 	case err := <-serverErr:
-		return err
-	}
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		logger.Error("server shutdown error", "error", err)
-		return err
+		if err != nil {
+			runErr = fmt.Errorf("serve HTTP: %w", err)
+		}
 	}
 
 	workerCancel()
 	waitDeleteWorker()
+
+	if runErr != nil {
+		return runErr
+	}
 
 	logger.Info("shutdown")
 	return nil

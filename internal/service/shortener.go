@@ -87,11 +87,6 @@ func (s *Shortener) Shorten(raw string) (string, error) {
 	return id, err
 }
 
-// ShortenForUser creates a short URL and associates it with a user.
-func (s *Shortener) ShortenForUser(raw string, userID string) (string, bool, error) {
-	return s.ShortenForUserContext(context.Background(), raw, userID)
-}
-
 // ShortenForUserContext creates a short URL using the provided context.
 func (s *Shortener) ShortenForUserContext(ctx context.Context, raw string, userID string) (string, bool, error) {
 	id, existed, err := s.ShortenWithExistingContext(ctx, raw)
@@ -106,11 +101,6 @@ func (s *Shortener) ShortenForUserContext(ctx context.Context, raw string, userI
 	return id, existed, nil
 }
 
-// ShortenWithExisting creates a short id or returns an existing one.
-func (s *Shortener) ShortenWithExisting(raw string) (string, bool, error) {
-	return s.ShortenWithExistingContext(context.Background(), raw)
-}
-
 // ShortenWithExistingContext creates a short id or returns an existing one using context.
 func (s *Shortener) ShortenWithExistingContext(ctx context.Context, raw string) (string, bool, error) {
 	normalized, err := normalizeURL(raw)
@@ -123,11 +113,6 @@ func (s *Shortener) ShortenWithExistingContext(ctx context.Context, raw string) 
 	}
 
 	return s.shortenWithUniqueID(ctx, normalized, idLen, 10)
-}
-
-// ShortenBatch shortens multiple URLs.
-func (s *Shortener) ShortenBatch(items []BatchItem, userID string) ([]BatchResult, error) {
-	return s.ShortenBatchContext(context.Background(), items, userID)
 }
 
 // ShortenBatchContext shortens multiple URLs using context.
@@ -197,11 +182,6 @@ func (s *Shortener) ShortenBatchContext(ctx context.Context, items []BatchItem, 
 	}
 
 	return results, nil
-}
-
-// Resolve returns the original URL by short id.
-func (s *Shortener) Resolve(id string) (string, bool) {
-	return s.ResolveContext(context.Background(), id)
 }
 
 // ResolveContext returns the original URL by short id using context.
@@ -291,8 +271,10 @@ func (s *Shortener) StartDeleteWorker(ctx context.Context, batchSize int, flushE
 		}
 
 		flush := func() {
+			remaining := 0
 			for userID, set := range pending {
 				if len(set) == 0 {
+					delete(pending, userID)
 					continue
 				}
 
@@ -302,14 +284,19 @@ func (s *Shortener) StartDeleteWorker(ctx context.Context, batchSize int, flushE
 				}
 
 				flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-				if err := s.repo.MarkDeleted(flushCtx, userID, ids); err != nil && logError != nil {
-					logError(err)
-				}
+				err := s.repo.MarkDeleted(flushCtx, userID, ids)
 				cancel()
+				if err != nil {
+					remaining += len(set)
+					if logError != nil {
+						logError(fmt.Errorf("mark URLs deleted for user %q: %w", userID, err))
+					}
+					continue
+				}
 
 				delete(pending, userID)
 			}
-			count = 0
+			count = remaining
 		}
 
 		drainAndFlush := func() {

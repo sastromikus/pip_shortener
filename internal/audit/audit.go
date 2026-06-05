@@ -52,8 +52,7 @@ func (n *Notifier) Enabled() bool {
 	return n != nil && len(n.observers) > 0
 }
 
-// NotifyAll sends the event to every configured audit observer synchronously.
-func (n *Notifier) NotifyAll(ctx context.Context, e Event) error {
+func (n *Notifier) notifyAll(ctx context.Context, e Event) error {
 	if n == nil || len(n.observers) == 0 {
 		return nil
 	}
@@ -112,7 +111,7 @@ func (n *Notifier) run() {
 	defer n.wg.Done()
 	for e := range n.queue {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_ = n.NotifyAll(ctx, e)
+		_ = n.notifyAll(ctx, e)
 		cancel()
 	}
 }
