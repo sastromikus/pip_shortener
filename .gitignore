@@ -8,15 +8,19 @@
 # Test binary, built with `go test -c`
 *.test
 
-# Output of the go coverage tool, specifically when used with LiteIDE
+# Output of the go coverage tool
 *.out
+
+# Audit/runtime logs
+profiles/*.pprof
+audit.log
 
 # Binaries
 cmd/shortener/main
 cmd/shortener/shortener
 cmd/shortener/shortener.exe
 
-# Dependency directories (remove the comment below to include it)
+# Dependency directories
 vendor/
 
 # IDEs directories
@@ -31,6 +35,3 @@ server.crt
 server.key
 storage.json
 storage.json.users
-
-# Accidental shell/path file
-$path
