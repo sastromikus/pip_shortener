@@ -20,7 +20,34 @@ import (
 	"github.com/sastromikus/pip_shortener/internal/service"
 )
 
+var buildVersion string
+var buildDate string
+var buildCommit string
+
+func printBuildInfo() {
+	v := buildVersion
+	if v == "" {
+		v = "N/A"
+	}
+
+	d := buildDate
+	if d == "" {
+		d = "N/A"
+	}
+
+	c := buildCommit
+	if c == "" {
+		c = "N/A"
+	}
+
+	fmt.Printf("Build version: %s\n", v)
+	fmt.Printf("Build date: %s\n", d)
+	fmt.Printf("Build commit: %s\n", c)
+}
+
 func main() {
+	printBuildInfo()
+
 	if err := run(); err != nil {
 		slog.Error("application failed", "error", err)
 		os.Exit(1)

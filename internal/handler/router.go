@@ -86,7 +86,7 @@ func handleShorten(svc *service.Shortener, baseURL string, logger *slog.Logger, 
 		return
 	}
 
-	notifyAudit(logger, r, auditor, audit.Event{Action: "shorten", UserID: userID, URL: raw})
+	notifyAudit(logger, auditor, audit.Event{Action: "shorten", UserID: userID, URL: raw})
 
 	w.Header().Set("Content-Type", "text/plain")
 	if existed {
@@ -117,13 +117,13 @@ func handleRedirect(svc *service.Shortener, id string, logger *slog.Logger, w ht
 	}
 
 	userID, _ := middleware.UserIDFromContext(r.Context())
-	notifyAudit(logger, r, auditor, audit.Event{Action: "follow", UserID: userID, URL: original})
+	notifyAudit(logger, auditor, audit.Event{Action: "follow", UserID: userID, URL: original})
 
 	w.Header().Set("Location", original)
 	w.WriteHeader(http.StatusTemporaryRedirect)
 }
 
-func notifyAudit(logger *slog.Logger, r *http.Request, auditor *audit.Notifier, event audit.Event) {
+func notifyAudit(logger *slog.Logger, auditor *audit.Notifier, event audit.Event) {
 	if auditor == nil || !auditor.Enabled() {
 		return
 	}

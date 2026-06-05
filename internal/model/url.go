@@ -1,6 +1,7 @@
 package model
 
 // URLItem describes a short URL record prepared for storage.
+// generate:reset
 type URLItem struct {
 	ID       string
 	Original string
