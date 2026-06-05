@@ -19,3 +19,22 @@ func Shadowed() {
 	panic := func(string) {}
 	panic("not builtin")
 }
+
+// PanicHelper is a test fixture wrapping the builtin panic function.
+func PanicHelper() {
+	panic("wrapped") // want "panic usage is forbidden"
+}
+
+type guard struct{}
+
+func (guard) panicIf(failed bool) {
+	if failed {
+		panic("method wrapper") // want "panic usage is forbidden"
+	}
+}
+
+// WrappedPanicCall verifies that calls through function and method wrappers are reported.
+func WrappedPanicCall() {
+	PanicHelper()         // want "panic usage is forbidden"
+	guard{}.panicIf(true) // want "panic usage is forbidden"
+}

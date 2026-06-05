@@ -25,12 +25,7 @@ func New[T Resettable](newFn func() T) *Pool[T] {
 
 // Get returns an object from the pool.
 func (pl *Pool[T]) Get() T {
-	v := pl.p.Get()
-	if v == nil {
-		var zero T
-		return zero
-	}
-	return v.(T)
+	return pl.p.Get().(T)
 }
 
 // Put resets obj and returns it to the pool.
