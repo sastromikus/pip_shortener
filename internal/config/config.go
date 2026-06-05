@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -125,7 +126,9 @@ func Parse() Config {
 		cfg.AuditURL = v
 	}
 	if v, ok := os.LookupEnv(envEnableHTTPS); ok {
-		cfg.EnableHTTPS = parseBool(v)
+		if enableHTTPS, err := strconv.ParseBool(v); err == nil {
+			cfg.EnableHTTPS = enableHTTPS
+		}
 	}
 
 	return cfg
@@ -178,14 +181,5 @@ func applyFileConfig(cfg *Config, fc fileConfig) {
 	}
 	if fc.EnableHTTPS != nil {
 		cfg.EnableHTTPS = *fc.EnableHTTPS
-	}
-}
-
-func parseBool(v string) bool {
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "1", "t", "true", "y", "yes", "on":
-		return true
-	default:
-		return false
 	}
 }
