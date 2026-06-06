@@ -10,9 +10,9 @@
 
 # Output of the go coverage tool
 *.out
-profiles/*.pprof
 
 # Audit/runtime logs
+profiles/*.pprof
 audit.log
 
 # Binaries
