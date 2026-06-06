@@ -169,12 +169,6 @@ func run() error {
 		if err != nil {
 			runErr = fmt.Errorf("serve gRPC: %w", err)
 		}
-		return nil
-	}
-
-	tlsConfig, err := selfSignedTLSConfig(cfg.ServerAddr)
-	if err != nil {
-		return err
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
