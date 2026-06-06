@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"flag"
 	"os"
+	"strconv"
 	"strings"
 )
 
-// Config holds application configuration derived from flags, config file and environment variables.
+// Config holds application configuration derived from defaults, config file, flags and environment variables.
 type Config struct {
 	ServerAddr      string
 	BaseURL         string
@@ -21,26 +22,21 @@ type Config struct {
 }
 
 const (
-	defaultServerAddr = "localhost:8080"
-	defaultBaseURL    = "http://localhost:8080"
-
-	envServerAddr = "SERVER_ADDRESS"
-	envBaseURL    = "BASE_URL"
-
+	defaultServerAddr      = "localhost:8080"
+	defaultBaseURL         = "http://localhost:8080"
 	defaultFileStoragePath = "storage.json"
-	envFileStoragePath     = "FILE_STORAGE_PATH"
+	defaultGRPCAddr        = "localhost:3200"
 
-	envDatabaseDSN = "DATABASE_DSN"
-	envEnableHTTPS = "ENABLE_HTTPS"
-	envAuditFile   = "AUDIT_FILE"
-	envAuditURL    = "AUDIT_URL"
-
-	envConfigPath = "CONFIG"
-
-	envTrustedSubnet = "TRUSTED_SUBNET"
-
-	defaultGRPCAddr = "localhost:3200"
-	envGRPCAddr     = "GRPC_ADDRESS"
+	envServerAddr      = "SERVER_ADDRESS"
+	envBaseURL         = "BASE_URL"
+	envFileStoragePath = "FILE_STORAGE_PATH"
+	envDatabaseDSN     = "DATABASE_DSN"
+	envEnableHTTPS     = "ENABLE_HTTPS"
+	envAuditFile       = "AUDIT_FILE"
+	envAuditURL        = "AUDIT_URL"
+	envConfigPath      = "CONFIG"
+	envTrustedSubnet   = "TRUSTED_SUBNET"
+	envGRPCAddr        = "GRPC_ADDRESS"
 )
 
 type fileConfig struct {
@@ -55,8 +51,7 @@ type fileConfig struct {
 	GRPCAddr        string `json:"grpc_address"`
 }
 
-// Parse reads flags, config file and environment variables and returns the resulting configuration.
-// Priority: config file (low) < flags < environment variables (high).
+// Parse reads configuration and applies priority: environment variables > flags > config file > defaults.
 func Parse() Config {
 	cfg := Config{
 		ServerAddr:      defaultServerAddr,
@@ -71,167 +66,151 @@ func Parse() Config {
 	var flagDSN string
 	var flagAuditFile string
 	var flagAuditURL string
-	var flagHTTPS bool
 	var flagConfig string
-	var flagSubnet string
-	var flagGRPC string
+	var flagTrustedSubnet string
+	var flagGRPCAddr string
+	var flagHTTPS bool
 
-	flag.StringVar(&flagFile, "f", "", "File storage path")
 	flag.StringVar(&flagAddr, "a", "", "HTTP server address")
 	flag.StringVar(&flagBase, "b", "", "Base URL for short links")
+	flag.StringVar(&flagFile, "f", "", "File storage path")
 	flag.StringVar(&flagDSN, "d", "", "Database DSN")
 	flag.StringVar(&flagDSN, "database-dsn", "", "Database DSN")
 	flag.StringVar(&flagDSN, "database_dsn", "", "Database DSN")
 	flag.StringVar(&flagAuditFile, "audit-file", "", "Audit log file path")
 	flag.StringVar(&flagAuditURL, "audit-url", "", "Audit receiver URL")
 	flag.BoolVar(&flagHTTPS, "s", false, "Enable HTTPS")
-	flag.StringVar(&flagSubnet, "t", "", "Trusted subnet CIDR (CIDR) for internal stats")
-	flag.StringVar(&flagConfig, "c", "", "Config file path (JSON)")
-	flag.StringVar(&flagConfig, "config", "", "Config file path (JSON)")
-	flag.StringVar(&flagGRPC, "g", "", "gRPC server address")
-	flag.StringVar(&flagGRPC, "grpc-address", "", "gRPC server address")
-
+	flag.StringVar(&flagTrustedSubnet, "t", "", "Trusted subnet CIDR")
+	flag.StringVar(&flagGRPCAddr, "g", "", "gRPC server address")
+	flag.StringVar(&flagGRPCAddr, "grpc-address", "", "gRPC server address")
+	flag.StringVar(&flagConfig, "c", "", "Config file path")
+	flag.StringVar(&flagConfig, "config", "", "Config file path")
 	flag.Parse()
 
-	flagsSet := struct {
-		addrSet   bool
-		baseSet   bool
-		fileSet   bool
-		dsnSet    bool
-		httpsSet  bool
-		auditFSet bool
-		auditUSet bool
-		subnetSet bool
-		grpcSet   bool
-	}{
-		addrSet:   flagAddr != "",
-		baseSet:   flagBase != "",
-		fileSet:   flagFile != "",
-		dsnSet:    flagDSN != "",
-		httpsSet:  flagHTTPS,
-		auditFSet: flagAuditFile != "",
-		auditUSet: flagAuditURL != "",
-		subnetSet: flagSubnet != "",
-		grpcSet:   flagGRPC != "",
-	}
-
-	if flagAddr != "" {
-		cfg.ServerAddr = flagAddr
-	}
-	if flagBase != "" {
-		cfg.BaseURL = flagBase
-	}
-	if flagFile != "" {
-		cfg.FileStoragePath = flagFile
-	}
-	if flagDSN != "" {
-		cfg.DatabaseDSN = flagDSN
-	}
-	if flagAuditFile != "" {
-		cfg.AuditFile = flagAuditFile
-	}
-	if flagAuditURL != "" {
-		cfg.AuditURL = flagAuditURL
-	}
-	if flagHTTPS {
-		cfg.EnableHTTPS = true
-	}
-	if flagSubnet != "" {
-		cfg.TrustedSubnet = flagSubnet
-	}
-	if flagGRPC != "" {
-		cfg.GRPCAddr = flagGRPC
-	}
+	flagsSet := visitedFlags()
 
 	configPath := flagConfig
-	if v := os.Getenv(envConfigPath); v != "" {
+	if v, ok := os.LookupEnv(envConfigPath); ok {
 		configPath = v
 	}
 
 	if fc, err := readConfigFile(configPath); err == nil {
-		if !flagsSet.addrSet && cfg.ServerAddr == defaultServerAddr && fc.ServerAddr != "" {
-			cfg.ServerAddr = fc.ServerAddr
-		}
-		if !flagsSet.baseSet && cfg.BaseURL == defaultBaseURL && fc.BaseURL != "" {
-			cfg.BaseURL = fc.BaseURL
-		}
-		if !flagsSet.fileSet && cfg.FileStoragePath == defaultFileStoragePath && fc.FileStoragePath != "" {
-			cfg.FileStoragePath = fc.FileStoragePath
-		}
-		if !flagsSet.dsnSet && cfg.DatabaseDSN == "" && fc.DatabaseDSN != "" {
-			cfg.DatabaseDSN = fc.DatabaseDSN
-		}
-		if !flagsSet.httpsSet && !cfg.EnableHTTPS && fc.EnableHTTPS != nil {
-			cfg.EnableHTTPS = *fc.EnableHTTPS
-		}
-		if !flagsSet.auditFSet && cfg.AuditFile == "" && fc.AuditFile != "" {
-			cfg.AuditFile = fc.AuditFile
-		}
-		if !flagsSet.auditUSet && cfg.AuditURL == "" && fc.AuditURL != "" {
-			cfg.AuditURL = fc.AuditURL
-		}
-		if !flagsSet.subnetSet && cfg.TrustedSubnet == "" && fc.TrustedSubnet != "" {
-			cfg.TrustedSubnet = fc.TrustedSubnet
-		}
-		if !flagsSet.grpcSet && cfg.GRPCAddr == defaultGRPCAddr && fc.GRPCAddr != "" {
-			cfg.GRPCAddr = fc.GRPCAddr
-		}
+		applyFileConfig(&cfg, fc)
 	}
 
-	if v := os.Getenv(envDatabaseDSN); v != "" {
-		cfg.DatabaseDSN = v
+	if flagsSet["a"] {
+		cfg.ServerAddr = flagAddr
 	}
-	if v := os.Getenv(envServerAddr); v != "" {
+	if flagsSet["b"] {
+		cfg.BaseURL = flagBase
+	}
+	if flagsSet["f"] {
+		cfg.FileStoragePath = flagFile
+	}
+	if flagsSet["d"] || flagsSet["database-dsn"] || flagsSet["database_dsn"] {
+		cfg.DatabaseDSN = flagDSN
+	}
+	if flagsSet["audit-file"] {
+		cfg.AuditFile = flagAuditFile
+	}
+	if flagsSet["audit-url"] {
+		cfg.AuditURL = flagAuditURL
+	}
+	if flagsSet["s"] {
+		cfg.EnableHTTPS = flagHTTPS
+	}
+	if flagsSet["t"] {
+		cfg.TrustedSubnet = flagTrustedSubnet
+	}
+	if flagsSet["g"] || flagsSet["grpc-address"] {
+		cfg.GRPCAddr = flagGRPCAddr
+	}
+
+	if v, ok := os.LookupEnv(envServerAddr); ok {
 		cfg.ServerAddr = v
 	}
-	if v := os.Getenv(envBaseURL); v != "" {
+	if v, ok := os.LookupEnv(envBaseURL); ok {
 		cfg.BaseURL = v
 	}
-	if v := os.Getenv(envFileStoragePath); v != "" {
+	if v, ok := os.LookupEnv(envFileStoragePath); ok {
 		cfg.FileStoragePath = v
 	}
-	if v := os.Getenv(envAuditFile); v != "" {
+	if v, ok := os.LookupEnv(envDatabaseDSN); ok {
+		cfg.DatabaseDSN = v
+	}
+	if v, ok := os.LookupEnv(envAuditFile); ok {
 		cfg.AuditFile = v
 	}
-	if v := os.Getenv(envAuditURL); v != "" {
+	if v, ok := os.LookupEnv(envAuditURL); ok {
 		cfg.AuditURL = v
 	}
-	if v := os.Getenv(envEnableHTTPS); v != "" {
-		cfg.EnableHTTPS = parseEnvBool(v)
+	if v, ok := os.LookupEnv(envEnableHTTPS); ok {
+		if enableHTTPS, err := strconv.ParseBool(v); err == nil {
+			cfg.EnableHTTPS = enableHTTPS
+		}
 	}
-	if v := os.Getenv(envTrustedSubnet); v != "" {
+	if v, ok := os.LookupEnv(envTrustedSubnet); ok {
 		cfg.TrustedSubnet = v
 	}
-	if v := os.Getenv(envGRPCAddr); v != "" {
+	if v, ok := os.LookupEnv(envGRPCAddr); ok {
 		cfg.GRPCAddr = v
 	}
 
 	return cfg
 }
 
-func readConfigFile(path string) (fileConfig, error) {
-	var fc fileConfig
-	if strings.TrimSpace(path) == "" {
-		return fc, os.ErrNotExist
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return fc, err
-	}
-	if err := json.Unmarshal(b, &fc); err != nil {
-		return fc, err
-	}
-	return fc, nil
+func visitedFlags() map[string]bool {
+	out := make(map[string]bool)
+	flag.Visit(func(f *flag.Flag) {
+		out[f.Name] = true
+	})
+	return out
 }
 
-func parseEnvBool(v string) bool {
-	s := strings.TrimSpace(strings.ToLower(v))
-	switch s {
-	case "1", "true", "yes", "y", "on":
-		return true
-	case "0", "false", "no", "n", "off":
-		return false
-	default:
-		return true
+func readConfigFile(path string) (fileConfig, error) {
+	if strings.TrimSpace(path) == "" {
+		return fileConfig{}, os.ErrNotExist
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fileConfig{}, err
+	}
+
+	var cfg fileConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return fileConfig{}, err
+	}
+
+	return cfg, nil
+}
+
+func applyFileConfig(cfg *Config, fc fileConfig) {
+	if fc.ServerAddr != "" {
+		cfg.ServerAddr = fc.ServerAddr
+	}
+	if fc.BaseURL != "" {
+		cfg.BaseURL = fc.BaseURL
+	}
+	if fc.FileStoragePath != "" {
+		cfg.FileStoragePath = fc.FileStoragePath
+	}
+	if fc.DatabaseDSN != "" {
+		cfg.DatabaseDSN = fc.DatabaseDSN
+	}
+	if fc.AuditFile != "" {
+		cfg.AuditFile = fc.AuditFile
+	}
+	if fc.AuditURL != "" {
+		cfg.AuditURL = fc.AuditURL
+	}
+	if fc.EnableHTTPS != nil {
+		cfg.EnableHTTPS = *fc.EnableHTTPS
+	}
+	if fc.TrustedSubnet != "" {
+		cfg.TrustedSubnet = fc.TrustedSubnet
+	}
+	if fc.GRPCAddr != "" {
+		cfg.GRPCAddr = fc.GRPCAddr
 	}
 }

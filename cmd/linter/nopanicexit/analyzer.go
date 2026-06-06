@@ -1,14 +1,13 @@
 package nopanicexit
 
 import (
-	"strings"
-
 	"go/ast"
-	"go/token"
+	"go/types"
 
 	"golang.org/x/tools/go/analysis"
 )
 
+// Analyzer reports forbidden panic, log.Fatal, and os.Exit usages.
 var Analyzer = &analysis.Analyzer{
 	Name: "nopanicexit",
 	Doc:  "reports panic usage and log.Fatal/os.Exit calls outside main.main",
@@ -16,116 +15,164 @@ var Analyzer = &analysis.Analyzer{
 }
 
 func run(pass *analysis.Pass) (any, error) {
-	var currentFunc *ast.FuncDecl
+	panicWrappers := findPanicWrappers(pass)
 
-	if pass.Pkg == nil {
-		return nil, nil
-	}
-
-	p := pass.Pkg.Path()
-	if !strings.HasPrefix(p, "github.com/sastromikus/pip_shortener") {
-		return nil, nil
-	}
-
-	ast.Inspect(pass.Files[0], func(n ast.Node) bool {
-		return true
-	})
-
-	for _, f := range pass.Files {
-		ast.Inspect(f, func(n ast.Node) bool {
-			switch x := n.(type) {
-			case *ast.FuncDecl:
-				currentFunc = x
-				return true
-			case *ast.CallExpr:
-				checkCall(pass, currentFunc, x)
-				return true
+	for _, file := range pass.Files {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
 			}
-			return true
-		})
+
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+
+				checkCall(pass, fn, call, panicWrappers)
+				return true
+			})
+		}
 	}
 
 	return nil, nil
 }
 
-func checkCall(pass *analysis.Pass, fn *ast.FuncDecl, call *ast.CallExpr) {
-	if id, ok := call.Fun.(*ast.Ident); ok && id.Name == "panic" {
-		pos := pass.Fset.Position(call.Lparen)
-		if !strings.Contains(pos.Filename, "pip_shortener") {
-			return
+func findPanicWrappers(pass *analysis.Pass) map[*types.Func]struct{} {
+	wrappers := make(map[*types.Func]struct{})
+	functions := make(map[*types.Func]*ast.FuncDecl)
+
+	for _, file := range pass.Files {
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil || fn.Name == nil {
+				continue
+			}
+
+			obj, ok := pass.TypesInfo.Defs[fn.Name].(*types.Func)
+			if ok {
+				functions[obj] = fn
+			}
+		}
+	}
+
+	changed := true
+	for changed {
+		changed = false
+		for obj, fn := range functions {
+			if _, exists := wrappers[obj]; exists {
+				continue
+			}
+			if functionCanPanic(pass, fn, wrappers) {
+				wrappers[obj] = struct{}{}
+				changed = true
+			}
+		}
+	}
+
+	return wrappers
+}
+
+func functionCanPanic(pass *analysis.Pass, fn *ast.FuncDecl, wrappers map[*types.Func]struct{}) bool {
+	canPanic := false
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		if canPanic {
+			return false
 		}
 
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+
+		if isBuiltinPanic(pass, call) || isPanicWrapperCall(pass, call, wrappers) {
+			canPanic = true
+			return false
+		}
+		return true
+	})
+	return canPanic
+}
+
+func checkCall(pass *analysis.Pass, fn *ast.FuncDecl, call *ast.CallExpr, panicWrappers map[*types.Func]struct{}) {
+	if isBuiltinPanic(pass, call) || isPanicWrapperCall(pass, call, panicWrappers) {
 		pass.Reportf(call.Lparen, "panic usage is forbidden")
 		return
 	}
 
-	if isSelectorCall(call, "log", map[string]bool{
-		"Fatal":   true,
-		"Fatalf":  true,
-		"Fatalln": true,
-	}) {
+	if isPackageFuncCall(pass, call, "log", "Fatal", "Fatalf", "Fatalln") {
 		if !allowedInMainMain(pass, fn) {
-			pos := pass.Fset.Position(call.Lparen)
-			if !strings.Contains(pos.Filename, "pip_shortener") {
-				return
-			}
-
 			pass.Reportf(call.Lparen, "log.Fatal is allowed only in main.main")
 		}
 		return
 	}
 
-	if isSelectorCall(call, "os", map[string]bool{
-		"Exit": true,
-	}) {
+	if isPackageFuncCall(pass, call, "os", "Exit") {
 		if !allowedInMainMain(pass, fn) {
-			pos := pass.Fset.Position(call.Lparen)
-			if !strings.Contains(pos.Filename, "pip_shortener") {
-				return
-			}
-
 			pass.Reportf(call.Lparen, "os.Exit is allowed only in main.main")
 		}
-		return
 	}
 }
 
-func isSelectorCall(call *ast.CallExpr, xIdent string, sels map[string]bool) bool {
-	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok {
+func isBuiltinPanic(pass *analysis.Pass, call *ast.CallExpr) bool {
+	id, ok := call.Fun.(*ast.Ident)
+	if !ok || id.Name != "panic" {
 		return false
 	}
 
-	x, ok := sel.X.(*ast.Ident)
-	if !ok || x.Name != xIdent {
+	obj := pass.TypesInfo.Uses[id]
+	return obj == types.Universe.Lookup("panic")
+}
+
+func isPanicWrapperCall(pass *analysis.Pass, call *ast.CallExpr, wrappers map[*types.Func]struct{}) bool {
+	obj := calledFunction(pass, call)
+	if obj == nil {
+		return false
+	}
+	_, ok := wrappers[obj]
+	return ok
+}
+
+func calledFunction(pass *analysis.Pass, call *ast.CallExpr) *types.Func {
+	switch fun := call.Fun.(type) {
+	case *ast.Ident:
+		obj, _ := pass.TypesInfo.Uses[fun].(*types.Func)
+		return obj
+	case *ast.SelectorExpr:
+		obj, _ := pass.TypesInfo.Uses[fun.Sel].(*types.Func)
+		return obj
+	default:
+		return nil
+	}
+}
+
+func isPackageFuncCall(pass *analysis.Pass, call *ast.CallExpr, pkgPath string, names ...string) bool {
+	obj := calledFunction(pass, call)
+	if obj == nil || obj.Pkg() == nil || obj.Pkg().Path() != pkgPath {
 		return false
 	}
 
-	return sels[sel.Sel.Name]
+	for _, name := range names {
+		if obj.Name() == name {
+			return true
+		}
+	}
+	return false
 }
 
 func allowedInMainMain(pass *analysis.Pass, fn *ast.FuncDecl) bool {
 	if pass.Pkg == nil || pass.Pkg.Name() != "main" {
 		return false
 	}
-
-	if !strings.HasSuffix(pass.Pkg.Path(), "/cmd/shortener") {
-		return false
-	}
-
 	if fn == nil || fn.Recv != nil || fn.Name == nil || fn.Name.Name != "main" {
 		return false
 	}
-
 	if fn.Type != nil && fn.Type.Params != nil && fn.Type.Params.NumFields() != 0 {
 		return false
 	}
-
 	if fn.Type != nil && fn.Type.Results != nil && fn.Type.Results.NumFields() != 0 {
 		return false
 	}
-
 	return true
 }
-
-var _ = token.NoPos

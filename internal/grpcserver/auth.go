@@ -2,42 +2,29 @@ package grpcserver
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"strings"
 
+	sharedauth "github.com/sastromikus/pip_shortener/internal/auth"
 	"google.golang.org/grpc/metadata"
 )
 
-var cookieSecret = []byte("change-me-secret")
-
+// UserIDFromAuthMeta reads and validates the authorization metadata value.
+// Both the raw signed token and the conventional "Bearer <token>" form are accepted.
 func UserIDFromAuthMeta(ctx context.Context) (string, bool) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return "", false
 	}
-	vals := md.Get("authorization")
-	if len(vals) == 0 {
-		return "", false
-	}
-	return verify(vals[0])
-}
 
-func verify(v string) (string, bool) {
-	parts := strings.Split(v, ":")
-	if len(parts) != 2 {
-		return "", false
-	}
-	uid := parts[0]
-	sigHex := parts[1]
-	if uid == "" || sigHex == "" {
+	values := md.Get("authorization")
+	if len(values) == 0 {
 		return "", false
 	}
 
-	mac := hmac.New(sha256.New, cookieSecret)
-	_, _ = mac.Write([]byte(uid))
-	want := hex.EncodeToString(mac.Sum(nil))
+	value := strings.TrimSpace(values[0])
+	if strings.HasPrefix(strings.ToLower(value), "bearer ") {
+		value = strings.TrimSpace(value[len("bearer "):])
+	}
 
-	return uid, hmac.Equal([]byte(want), []byte(sigHex))
+	return sharedauth.Verify(value, sharedauth.Secret())
 }

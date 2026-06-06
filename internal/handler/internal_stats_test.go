@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -18,7 +19,7 @@ func TestInternalStats_ForbiddenWhenNoSubnet(t *testing.T) {
 	req.Header.Set("X-Real-IP", "127.0.0.1")
 	w := httptest.NewRecorder()
 
-	handleInternalStats(svc, "", w, req)
+	handleInternalStats(svc, "", nil, w, req)
 
 	res := w.Result()
 	res.Body.Close()
@@ -36,7 +37,7 @@ func TestInternalStats_ForbiddenWhenBadCIDR(t *testing.T) {
 	req.Header.Set("X-Real-IP", "127.0.0.1")
 	w := httptest.NewRecorder()
 
-	handleInternalStats(svc, "not-a-cidr", w, req)
+	handleInternalStats(svc, "not-a-cidr", nil, w, req)
 
 	res := w.Result()
 	res.Body.Close()
@@ -52,7 +53,7 @@ func TestInternalStats_ForbiddenWhenIPMissingOrOutside(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/internal/stats", nil)
 	w := httptest.NewRecorder()
-	handleInternalStats(svc, "127.0.0.0/8", w, req)
+	handleInternalStats(svc, "127.0.0.0/8", nil, w, req)
 
 	res := w.Result()
 	res.Body.Close()
@@ -64,7 +65,7 @@ func TestInternalStats_ForbiddenWhenIPMissingOrOutside(t *testing.T) {
 	req2 := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/internal/stats", nil)
 	req2.Header.Set("X-Real-IP", "10.1.2.3")
 	w2 := httptest.NewRecorder()
-	handleInternalStats(svc, "127.0.0.0/8", w2, req2)
+	handleInternalStats(svc, "127.0.0.0/8", nil, w2, req2)
 
 	res2 := w2.Result()
 	res2.Body.Close()
@@ -78,18 +79,18 @@ func TestInternalStats_OKReturnsJSONCounts(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
 
-	_, _, err := svc.ShortenForUser("https://example.com/a", "u1")
+	_, _, err := svc.ShortenForUserContext(context.Background(), "https://example.com/a", "u1")
 	if err != nil {
 		t.Fatalf("shorten: %v", err)
 	}
-	_, _, _ = svc.ShortenForUser("https://example.com/b", "u1")
-	_, _, _ = svc.ShortenForUser("https://example.com/c", "u2")
+	_, _, _ = svc.ShortenForUserContext(context.Background(), "https://example.com/b", "u1")
+	_, _, _ = svc.ShortenForUserContext(context.Background(), "https://example.com/c", "u2")
 
 	req := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/internal/stats", nil)
 	req.Header.Set("X-Real-IP", "127.0.0.1")
 	w := httptest.NewRecorder()
 
-	handleInternalStats(svc, "127.0.0.0/8", w, req)
+	handleInternalStats(svc, "127.0.0.0/8", nil, w, req)
 
 	res := w.Result()
 	defer res.Body.Close()

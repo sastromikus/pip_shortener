@@ -2,9 +2,11 @@ package handler
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 
+	"github.com/sastromikus/pip_shortener/internal/handler/middleware"
 	"github.com/sastromikus/pip_shortener/internal/service"
 )
 
@@ -18,53 +20,64 @@ type apiBatchResponseItem struct {
 	ShortURL      string `json:"short_url"`
 }
 
-func handleAPIPostShortenBatchJSON(svc *service.Shortener, baseURL string, w http.ResponseWriter, r *http.Request) {
+func handleAPIPostShortenBatchJSON(svc *service.Shortener, baseURL string, logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
 	ct := r.Header.Get("Content-Type")
 	if ct == "" || !strings.HasPrefix(strings.ToLower(ct), "application/json") {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
-	body, err := readBody(r, maxPOSTBody)
+	body, err := readBody(w, r, maxPOSTBody)
 	if err != nil {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
 	var in []apiBatchRequestItem
 	if err := json.Unmarshal(body, &in); err != nil {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 	if len(in) == 0 {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
-	baseURL = strings.TrimRight(baseURL, "/")
-
-	out := make([]apiBatchResponseItem, 0, len(in))
+	items := make([]service.BatchItem, 0, len(in))
 	for _, item := range in {
 		cid := strings.TrimSpace(item.CorrelationID)
 		orig := strings.TrimSpace(item.OriginalURL)
 		if cid == "" || orig == "" {
-			badRequest(w)
+			writeStatus(w, http.StatusBadRequest)
 			return
 		}
+		items = append(items, service.BatchItem{CorrelationID: cid, OriginalURL: orig})
+	}
 
-		id, err := svc.Shorten(orig)
-		if err != nil {
-			badRequest(w)
-			return
+	userID, _ := middleware.UserIDFromContext(r.Context())
+	results, err := svc.ShortenBatchContext(r.Context(), items, userID)
+	if err != nil {
+		status := statusFromServiceError(err)
+		if status == http.StatusInternalServerError {
+			logger.Error("batch shorten failed", "error", err)
 		}
+		writeStatus(w, status)
+		return
+	}
 
+	out := make([]apiBatchResponseItem, 0, len(results))
+	for _, result := range results {
 		out = append(out, apiBatchResponseItem{
-			CorrelationID: cid,
-			ShortURL:      baseURL + "/" + id,
+			CorrelationID: result.CorrelationID,
+			ShortURL:      joinURL(baseURL, result.ID),
 		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(out)
+
+	if err := json.NewEncoder(w).Encode(out); err != nil {
+		internalServerError(logger, w, "encode batch shorten response", err)
+		return
+	}
 }

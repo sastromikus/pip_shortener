@@ -2,9 +2,9 @@ package handler_test
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,18 +12,14 @@ import (
 	"github.com/sastromikus/pip_shortener/internal/handler"
 	"github.com/sastromikus/pip_shortener/internal/repository"
 	"github.com/sastromikus/pip_shortener/internal/service"
-	"github.com/sirupsen/logrus"
 )
 
 func Example_postTextPlain() {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	logger := logrus.New()
-	logger.SetOutput(io.Discard)
-	logger.SetLevel(logrus.InfoLevel)
-
-	h := handler.NewRouter(svc, "http://localhost:8080", logger, nil, nil, "")
+	h := handler.NewRouter(svc, "http://example", logger, nil, nil, "")
 	ts := httptest.NewServer(h)
 	defer ts.Close()
 
@@ -47,27 +43,20 @@ func Example_postTextPlain() {
 		return
 	}
 
-	out := strings.TrimSpace(string(b))
-
 	fmt.Println(res.StatusCode)
-	fmt.Println(strings.HasPrefix(out, "http://") || strings.HasPrefix(out, "https://"))
-	fmt.Println(strings.Contains(out, "/"))
+	fmt.Println(strings.HasPrefix(string(b), "http://example/"))
 
 	// Output:
 	// 201
-	// true
 	// true
 }
 
 func Example_postJSON() {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	logger := logrus.New()
-	logger.SetOutput(io.Discard)
-	logger.SetLevel(logrus.InfoLevel)
-
-	h := handler.NewRouter(svc, "http://localhost:8080", logger, nil, nil, "")
+	h := handler.NewRouter(svc, "http://example", logger, nil, nil, "")
 	ts := httptest.NewServer(h)
 	defer ts.Close()
 
@@ -91,18 +80,12 @@ func Example_postJSON() {
 		fmt.Println("read error")
 		return
 	}
-
-	var resp struct {
-		Result string `json:"result"`
-	}
-	_ = json.Unmarshal(b, &resp)
+	s := string(b)
 
 	fmt.Println(res.StatusCode)
-	fmt.Println(strings.HasPrefix(resp.Result, "http://") || strings.HasPrefix(resp.Result, "https://"))
-	fmt.Println(strings.Contains(resp.Result, "/"))
+	fmt.Println(strings.Contains(s, `"result":"http://example/`))
 
 	// Output:
 	// 201
-	// true
 	// true
 }

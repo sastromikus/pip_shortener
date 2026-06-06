@@ -4,23 +4,22 @@ import (
 	"database/sql"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/sastromikus/pip_shortener/internal/audit"
 	"github.com/sastromikus/pip_shortener/internal/handler/middleware"
 	"github.com/sastromikus/pip_shortener/internal/service"
-
-	"github.com/go-chi/chi/v5"
-	"github.com/sirupsen/logrus"
 )
 
 const maxPOSTBody = 8 << 10
 
-// NewRouter builds an HTTP router with all service endpoints.
-// baseURL is used as a prefix for generated short links.
-// auditor may be nil to disable audit events.
-func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger, db *sql.DB, auditor *audit.Notifier, trustedSubnet string) http.Handler {
+// NewRouter builds the HTTP router with all application handlers and middleware.
+func NewRouter(svc *service.Shortener, baseURL string, logger *slog.Logger, db *sql.DB, auditor *audit.Notifier, trustedSubnet string) http.Handler {
 	baseURL = strings.TrimRight(baseURL, "/")
 
 	r := chi.NewRouter()
@@ -28,80 +27,69 @@ func NewRouter(svc *service.Shortener, baseURL string, logger *logrus.Logger, db
 	r.Use(middleware.Gzip())
 	r.Use(middleware.Logger(logger))
 
-	r.NotFound(func(w http.ResponseWriter, r *http.Request) { badRequest(w) })
-	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) { badRequest(w) })
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) { writeStatus(w, http.StatusBadRequest) })
+	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) { writeStatus(w, http.StatusBadRequest) })
 
 	r.Post("/", func(w http.ResponseWriter, r *http.Request) {
-		handleShorten(svc, baseURL, w, r, auditor)
+		handleShorten(svc, baseURL, logger, w, r, auditor)
 	})
-
 	r.Post("/api/shorten", func(w http.ResponseWriter, r *http.Request) {
-		handleAPIPostShortenJSON(svc, baseURL, w, r, auditor)
+		handleAPIPostShortenJSON(svc, baseURL, logger, w, r, auditor)
 	})
-
 	r.Post("/api/shorten/batch", func(w http.ResponseWriter, r *http.Request) {
-		handleAPIPostShortenBatchJSON(svc, baseURL, w, r)
+		handleAPIPostShortenBatchJSON(svc, baseURL, logger, w, r)
 	})
-
+	r.Get("/api/user/urls", func(w http.ResponseWriter, r *http.Request) {
+		handleUserURLs(svc, baseURL, logger, w, r)
+	})
+	r.Delete("/api/user/urls", func(w http.ResponseWriter, r *http.Request) {
+		handleDeleteUserURLs(svc, logger, w, r)
+	})
 	r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
 		handlePing(db, w, r)
 	})
-
-	r.Get("/api/user/urls", func(w http.ResponseWriter, r *http.Request) {
-		handleGetUserURLs(svc, baseURL, w, r)
-	})
-
-	r.Delete("/api/user/urls", func(w http.ResponseWriter, r *http.Request) {
-		handleDeleteUserURLs(svc, w, r)
-	})
-
-	r.Get("/{id}", func(w http.ResponseWriter, r *http.Request) {
-		id := chi.URLParam(r, "id")
-		handleRedirect(svc, id, w, r, auditor)
-	})
-
 	r.Get("/api/internal/stats", func(w http.ResponseWriter, r *http.Request) {
-		handleInternalStats(svc, trustedSubnet, w, r)
+		handleInternalStats(svc, trustedSubnet, logger, w, r)
+	})
+	r.Get("/{id}", func(w http.ResponseWriter, r *http.Request) {
+		handleRedirect(svc, chi.URLParam(r, "id"), logger, w, r, auditor)
 	})
 
 	return r
 }
 
-func handleShorten(svc *service.Shortener, baseURL string, w http.ResponseWriter, r *http.Request, auditor *audit.Notifier) {
-	ct := r.Header.Get("Content-Type")
-	if ct == "" || !strings.HasPrefix(strings.ToLower(ct), "text/plain") {
-		badRequest(w)
+func handleShorten(svc *service.Shortener, baseURL string, logger *slog.Logger, w http.ResponseWriter, r *http.Request, auditor *audit.Notifier) {
+	ct := strings.ToLower(r.Header.Get("Content-Type"))
+	ce := strings.ToLower(r.Header.Get("Content-Encoding"))
+	if ct != "" && !(strings.HasPrefix(ct, "text/plain") || (strings.Contains(ce, "gzip") && strings.HasPrefix(ct, "application/x-gzip"))) {
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
-	body, err := readBody(r, maxPOSTBody)
+	body, err := readBody(w, r, maxPOSTBody)
 	if err != nil {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
 	raw := strings.TrimSpace(string(body))
 	if raw == "" {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
 	userID, _ := middleware.UserIDFromContext(r.Context())
-	id, existed, err := svc.ShortenForUser(raw, userID)
+	id, existed, err := svc.ShortenForUserContext(r.Context(), raw, userID)
 	if err != nil {
-		badRequest(w)
+		status := statusFromServiceError(err)
+		if status == http.StatusInternalServerError {
+			logger.Error("shorten failed", "error", err)
+		}
+		writeStatus(w, status)
 		return
 	}
 
-	if auditor != nil {
-		auditor.NotifyAllAsync(r.Context(), audit.Event{
-			Action: "shorten",
-			UserID: userID,
-			URL:    raw,
-		})
-	}
-
-	shortURL := baseURL + "/" + id
+	notifyAudit(logger, auditor, audit.Event{Action: "shorten", UserID: userID, URL: raw})
 
 	w.Header().Set("Content-Type", "text/plain")
 	if existed {
@@ -109,46 +97,77 @@ func handleShorten(svc *service.Shortener, baseURL string, w http.ResponseWriter
 	} else {
 		w.WriteHeader(http.StatusCreated)
 	}
-	_, _ = w.Write([]byte(shortURL))
+
+	_, _ = w.Write([]byte(joinURL(baseURL, id)))
 }
 
-func handleRedirect(svc *service.Shortener, id string, w http.ResponseWriter, r *http.Request, auditor *audit.Notifier) {
-	original, ok, deleted := svc.ResolveWithDeleted(id)
-	if !ok {
-		badRequest(w)
+func handleRedirect(svc *service.Shortener, id string, logger *slog.Logger, w http.ResponseWriter, r *http.Request, auditor *audit.Notifier) {
+	id = strings.TrimSpace(id)
+	if id == "" || strings.ContainsAny(id, " \t\r\n") {
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
+
+	original, ok, deleted := svc.ResolveWithDeleted(r.Context(), id)
+	if !ok {
+		writeStatus(w, http.StatusBadRequest)
+		return
+	}
+
 	if deleted {
-		w.WriteHeader(http.StatusGone)
+		writeStatus(w, http.StatusGone)
 		return
 	}
 
 	userID, _ := middleware.UserIDFromContext(r.Context())
-	if auditor != nil {
-		auditor.NotifyAllAsync(r.Context(), audit.Event{
-			Action: "follow",
-			UserID: userID,
-			URL:    original,
-		})
-	}
+	notifyAudit(logger, auditor, audit.Event{Action: "follow", UserID: userID, URL: original})
 
 	w.Header().Set("Location", original)
 	w.WriteHeader(http.StatusTemporaryRedirect)
 }
 
-func readBody(r *http.Request, limit int64) ([]byte, error) {
-	defer r.Body.Close()
-	lr := &io.LimitedReader{R: r.Body, N: limit + 1}
-	b, err := io.ReadAll(lr)
-	if err != nil {
-		return nil, err
+func notifyAudit(logger *slog.Logger, auditor *audit.Notifier, event audit.Event) {
+	if auditor == nil || !auditor.Enabled() {
+		return
 	}
-	if int64(len(b)) > limit {
-		return nil, errors.New("body too large")
+
+	if err := auditor.Enqueue(event); err != nil && logger != nil {
+		logger.Error("audit notify failed", "error", err)
 	}
-	return b, nil
 }
 
-func badRequest(w http.ResponseWriter) {
-	w.WriteHeader(http.StatusBadRequest)
+func readBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, error) {
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
+	return io.ReadAll(r.Body)
+}
+
+func joinURL(baseURL string, id string) string {
+	joined, err := url.JoinPath(baseURL, id)
+	if err != nil {
+		return strings.TrimRight(baseURL, "/") + "/" + id
+	}
+	return joined
+}
+
+func statusFromServiceError(err error) int {
+	if errors.Is(err, service.ErrEmptyURL) ||
+		errors.Is(err, service.ErrUnsupportedScheme) ||
+		errors.Is(err, service.ErrEmptyHost) {
+		return http.StatusBadRequest
+	}
+
+	return http.StatusInternalServerError
+}
+
+func writeStatus(w http.ResponseWriter, status int) {
+	http.Error(w, http.StatusText(status), status)
+}
+
+func internalServerError(logger *slog.Logger, w http.ResponseWriter, msg string, err error) {
+	if logger != nil && err != nil {
+		logger.Error(msg, "error", err)
+	}
+
+	http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 }

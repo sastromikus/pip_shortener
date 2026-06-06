@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -14,25 +15,21 @@ import (
 
 	"github.com/sastromikus/pip_shortener/internal/repository"
 	"github.com/sastromikus/pip_shortener/internal/service"
-	"github.com/sirupsen/logrus"
 )
 
-func BenchmarkPOST_Shorten_TextPlain(b *testing.B) {
+func BenchmarkPOSTShortenTextPlain(b *testing.B) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
-
-	logger := logrus.New()
-	logger.SetLevel(logrus.InfoLevel)
-	logger.SetOutput(io.Discard)
-
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil, "")
 
 	u := mustURL("http://localhost:8080/")
 	body := []byte("http://example.com/path")
 	cookie := validUserCookie("bench")
 
+	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		req := &http.Request{
 			Method: http.MethodPost,
 			URL:    u,
@@ -48,22 +45,19 @@ func BenchmarkPOST_Shorten_TextPlain(b *testing.B) {
 	}
 }
 
-func BenchmarkPOST_API_Shorten_JSON(b *testing.B) {
+func BenchmarkPOSTAPIShortenJSON(b *testing.B) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
-
-	logger := logrus.New()
-	logger.SetLevel(logrus.InfoLevel)
-	logger.SetOutput(io.Discard)
-
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil, "")
 
 	u := mustURL("http://localhost:8080/api/shorten")
 	payload := []byte(`{"url":"https://practicum.yandex.ru/"}`)
 	cookie := validUserCookie("bench")
 
+	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		req := &http.Request{
 			Method: http.MethodPost,
 			URL:    u,
@@ -79,13 +73,10 @@ func BenchmarkPOST_API_Shorten_JSON(b *testing.B) {
 	}
 }
 
-func BenchmarkGET_Follow(b *testing.B) {
+func BenchmarkGETFollow(b *testing.B) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
-
-	logger := logrus.New()
-	logger.SetLevel(logrus.InfoLevel)
-	logger.SetOutput(io.Discard)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	repo.Put("TESTID12", "https://example.com/path")
 	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil, "")
@@ -93,8 +84,9 @@ func BenchmarkGET_Follow(b *testing.B) {
 	u := mustURL("http://localhost:8080/TESTID12")
 	cookie := validUserCookie("bench")
 
+	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		req := &http.Request{
 			Method: http.MethodGet,
 			URL:    u,
@@ -124,6 +116,5 @@ func validUserCookie(uid string) string {
 	_, _ = mac.Write([]byte(uid))
 	sig := hex.EncodeToString(mac.Sum(nil))
 
-	// ровно как в middleware: "user_id=uid:sig"
 	return "user_id=" + uid + ":" + sig
 }

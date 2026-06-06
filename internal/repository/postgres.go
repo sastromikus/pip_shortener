@@ -3,38 +3,49 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"strings"
 
-	"github.com/lib/pq"
+	"github.com/sastromikus/pip_shortener/internal/model"
 )
 
-// PostgresRepository stores URL mappings in PostgreSQL.
+// PostgresRepository stores URLs in PostgreSQL.
 type PostgresRepository struct {
 	db *sql.DB
 }
 
-// UserURL represents a user-owned short URL mapping.
-type UserURL struct {
-	ShortID  string
-	Original string
-}
-
-// UserURLStore provides operations for user-owned URL mappings.
-type UserURLStore interface {
-	AddUserURL(userID, shortID string) error
-	ListUserURLs(userID string) ([]UserURL, error)
-}
-
-// NewPostgresRepository creates a PostgreSQL-backed repository.
+// NewPostgresRepository creates a PostgreSQL repository around an existing DB handle.
 func NewPostgresRepository(db *sql.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
-func (r *PostgresRepository) Get(id string) (string, bool) {
-	var original string
-	err := r.db.QueryRowContext(context.Background(),
-		`SELECT original_url FROM urls WHERE short_id = $1`, id,
-	).Scan(&original)
+// NewPostgresStorage opens PostgreSQL storage and applies migrations.
+func NewPostgresStorage(ctx context.Context, dsn string) (*sql.DB, *PostgresRepository, error) {
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return nil, nil, fmt.Errorf("open postgres: %w", err)
+	}
 
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, nil, fmt.Errorf("ping postgres: %w", err)
+	}
+
+	if err := RunPostgresMigrations(ctx, db); err != nil {
+		_ = db.Close()
+		return nil, nil, fmt.Errorf("run postgres migrations: %w", err)
+	}
+
+	return db, NewPostgresRepository(db), nil
+}
+
+// Get returns the original URL by short id.
+func (r *PostgresRepository) Get(ctx context.Context, id string) (string, bool) {
+	var original string
+	err := r.db.QueryRowContext(ctx,
+		`SELECT original_url FROM urls WHERE short_id = $1`,
+		id,
+	).Scan(&original)
 	if err != nil {
 		return "", false
 	}
@@ -42,33 +53,29 @@ func (r *PostgresRepository) Get(id string) (string, bool) {
 	return original, true
 }
 
-func (r *PostgresRepository) Put(id string, original string) {
-	_, _ = r.db.ExecContext(context.Background(),
-		`INSERT INTO urls (short_id, original_url) VALUES ($1, $2)
-		 ON CONFLICT (short_id) DO UPDATE SET original_url = EXCLUDED.original_url`,
-		id, original,
-	)
-}
+// GetWithDeleted returns the original URL and deletion state by short id.
+func (r *PostgresRepository) GetWithDeleted(ctx context.Context, id string) (string, bool, bool) {
+	var original string
+	var deleted bool
 
-func (r *PostgresRepository) Exists(id string) bool {
-	var exists bool
-	err := r.db.QueryRowContext(context.Background(),
-		`SELECT EXISTS(SELECT 1 FROM urls WHERE short_id = $1)`, id,
-	).Scan(&exists)
-
+	err := r.db.QueryRowContext(ctx,
+		`SELECT original_url, is_deleted FROM urls WHERE short_id = $1`,
+		id,
+	).Scan(&original, &deleted)
 	if err != nil {
-		return false
+		return "", false, false
 	}
 
-	return exists
+	return original, true, deleted
 }
 
-func (r *PostgresRepository) GetByOriginal(original string) (string, bool) {
+// GetByOriginal returns the short id for an original URL.
+func (r *PostgresRepository) GetByOriginal(ctx context.Context, original string) (string, bool) {
 	var shortID string
-	err := r.db.QueryRowContext(context.Background(),
-		`SELECT short_id FROM urls WHERE original_url = $1`, original,
+	err := r.db.QueryRowContext(ctx,
+		`SELECT short_id FROM urls WHERE original_url = $1`,
+		original,
 	).Scan(&shortID)
-
 	if err != nil {
 		return "", false
 	}
@@ -76,45 +83,101 @@ func (r *PostgresRepository) GetByOriginal(original string) (string, bool) {
 	return shortID, true
 }
 
-func (r *PostgresRepository) Insert(id, original string) error {
-	_, err := r.db.ExecContext(context.Background(),
-		`INSERT INTO urls (short_id, original_url) VALUES ($1,$2)`,
-		id, original,
+// PutIfAbsent stores a URL only when neither short id nor original URL exists.
+func (r *PostgresRepository) PutIfAbsent(ctx context.Context, id string, original string) (bool, error) {
+	res, err := r.db.ExecContext(ctx,
+		`INSERT INTO urls (short_id, original_url)
+		 VALUES ($1, $2)
+		 ON CONFLICT DO NOTHING`,
+		id,
+		original,
 	)
+	if err != nil {
+		return false, err
+	}
 
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+
+	return rows > 0, nil
+}
+
+// PutBatchIfAbsent stores multiple URL records when they are absent.
+func (r *PostgresRepository) PutBatchIfAbsent(ctx context.Context, items []model.URLItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+
+	var b strings.Builder
+	args := make([]any, 0, len(items)*2)
+
+	b.WriteString(`INSERT INTO urls (short_id, original_url) VALUES `)
+	for i, item := range items {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+
+		argPos := i*2 + 1
+		b.WriteString(fmt.Sprintf("($%d, $%d)", argPos, argPos+1))
+		args = append(args, item.ID, item.Original)
+	}
+	b.WriteString(` ON CONFLICT DO NOTHING`)
+
+	_, err := r.db.ExecContext(ctx, b.String(), args...)
 	return err
 }
 
-// IsUniqueViolationOn reports whether err is a unique constraint violation
-// for the given constraint name.
-func IsUniqueViolationOn(err error, constraint string) bool {
-	pqe, ok := err.(*pq.Error)
-	if !ok {
-		return false
-	}
-
-	if string(pqe.Code) != "23505" {
-		return false
-	}
-
-	return pqe.Constraint == constraint
+// Put is kept for tests and simple compatibility. Business code should prefer PutIfAbsent.
+func (r *PostgresRepository) Put(id string, original string) {
+	_, _ = r.PutIfAbsent(context.Background(), id, original)
 }
 
-func (r *PostgresRepository) AddUserURL(userID, shortID string) error {
-	_, err := r.db.ExecContext(context.Background(),
-		`INSERT INTO user_urls (user_id, short_id) VALUES ($1,$2)
-		 ON CONFLICT (user_id, short_id) DO NOTHING`,
-		userID, shortID,
-	)
+// Exists reports whether a short id is already stored.
+func (r *PostgresRepository) Exists(id string) bool {
+	_, ok := r.Get(context.Background(), id)
+	return ok
+}
+
+// AddUserURL associates a short id with a user.
+func (r *PostgresRepository) AddUserURL(ctx context.Context, userID, shortID string) error {
+	return r.AddUserURLs(ctx, userID, []string{shortID})
+}
+
+// AddUserURLs associates multiple short ids with a user.
+func (r *PostgresRepository) AddUserURLs(ctx context.Context, userID string, shortIDs []string) error {
+	if userID == "" || len(shortIDs) == 0 {
+		return nil
+	}
+
+	var b strings.Builder
+	args := make([]any, 0, len(shortIDs)*2)
+
+	b.WriteString(`INSERT INTO user_urls (user_id, short_id) VALUES `)
+	for i, shortID := range shortIDs {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+
+		argPos := i*2 + 1
+		b.WriteString(fmt.Sprintf("($%d, $%d)", argPos, argPos+1))
+		args = append(args, userID, shortID)
+	}
+	b.WriteString(` ON CONFLICT (user_id, short_id) DO NOTHING`)
+
+	_, err := r.db.ExecContext(ctx, b.String(), args...)
 	return err
 }
 
-func (r *PostgresRepository) ListUserURLs(userID string) ([]UserURL, error) {
-	rows, err := r.db.QueryContext(context.Background(),
+// ListUserURLs returns all non-deleted URLs owned by a user.
+func (r *PostgresRepository) ListUserURLs(ctx context.Context, userID string) ([]model.UserURL, error) {
+	rows, err := r.db.QueryContext(ctx,
 		`SELECT u.short_id, u.original_url
 		   FROM user_urls uu
 		   JOIN urls u ON u.short_id = uu.short_id
 		  WHERE uu.user_id = $1
+		    AND u.is_deleted = FALSE
 		  ORDER BY u.id`,
 		userID,
 	)
@@ -123,13 +186,13 @@ func (r *PostgresRepository) ListUserURLs(userID string) ([]UserURL, error) {
 	}
 	defer rows.Close()
 
-	out := make([]UserURL, 0)
+	out := make([]model.UserURL, 0)
 	for rows.Next() {
-		var shortID, original string
-		if err := rows.Scan(&shortID, &original); err != nil {
+		var item model.UserURL
+		if err := rows.Scan(&item.ShortID, &item.Original); err != nil {
 			return nil, err
 		}
-		out = append(out, UserURL{ShortID: shortID, Original: original})
+		out = append(out, item)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -138,49 +201,48 @@ func (r *PostgresRepository) ListUserURLs(userID string) ([]UserURL, error) {
 	return out, nil
 }
 
-func (r *PostgresRepository) GetWithDeleted(id string) (string, bool, bool) {
-	var original string
-	var deleted bool
-
-	err := r.db.QueryRowContext(context.Background(),
-		`SELECT original_url, is_deleted FROM urls WHERE short_id = $1`, id,
-	).Scan(&original, &deleted)
-
-	if err != nil {
-		return "", false, false
-	}
-
-	return original, true, deleted
-}
-
-func (r *PostgresRepository) MarkDeleted(userID string, ids []string) error {
-	if len(ids) == 0 {
+// MarkDeleted marks user-owned URLs as deleted.
+func (r *PostgresRepository) MarkDeleted(ctx context.Context, userID string, ids []string) error {
+	if userID == "" || len(ids) == 0 {
 		return nil
 	}
 
-	_, err := r.db.ExecContext(context.Background(),
-		`UPDATE urls u
-           SET is_deleted = TRUE
-          FROM user_urls uu
-         WHERE uu.short_id = u.short_id
-           AND uu.user_id = $1
-           AND u.short_id = ANY($2)`,
-		userID, pq.Array(ids),
-	)
+	var b strings.Builder
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, userID)
 
+	b.WriteString(`UPDATE urls u
+		   SET is_deleted = TRUE
+		  FROM user_urls uu
+		 WHERE uu.short_id = u.short_id
+		   AND uu.user_id = $1
+		   AND u.short_id IN (`)
+
+	for i, id := range ids {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		argPos := i + 2
+		b.WriteString(fmt.Sprintf("$%d", argPos))
+		args = append(args, id)
+	}
+	b.WriteString(`)`)
+
+	_, err := r.db.ExecContext(ctx, b.String(), args...)
 	return err
 }
 
-func (r *PostgresRepository) CountURLs() (int, error) {
-	var n int
-	err := r.db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM urls`).Scan(&n)
-	return n, err
-}
+// Stats returns the number of stored URLs and distinct users with URLs.
+func (r *PostgresRepository) Stats(ctx context.Context) (int, int, error) {
+	var urls int
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM urls`).Scan(&urls); err != nil {
+		return 0, 0, fmt.Errorf("count urls: %w", err)
+	}
 
-func (r *PostgresRepository) CountUsers() (int, error) {
-	var n int
-	err := r.db.QueryRowContext(context.Background(),
-		`SELECT COUNT(DISTINCT user_id) FROM user_urls`,
-	).Scan(&n)
-	return n, err
+	var users int
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(DISTINCT user_id) FROM user_urls`).Scan(&users); err != nil {
+		return 0, 0, fmt.Errorf("count users: %w", err)
+	}
+
+	return urls, users, nil
 }

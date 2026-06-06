@@ -2,17 +2,24 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"database/sql"
-	"errors"
+	"encoding/pem"
 	"fmt"
-	"log"
+	"log/slog"
+	"math/big"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
 
 	shortenerv1 "github.com/sastromikus/pip_shortener/api/grpc"
 	"github.com/sastromikus/pip_shortener/internal/audit"
@@ -21,12 +28,7 @@ import (
 	"github.com/sastromikus/pip_shortener/internal/handler"
 	"github.com/sastromikus/pip_shortener/internal/repository"
 	"github.com/sastromikus/pip_shortener/internal/service"
-
 	"google.golang.org/grpc"
-
-	"github.com/sirupsen/logrus"
-
-	_ "github.com/lib/pq"
 )
 
 var buildVersion string
@@ -54,125 +56,62 @@ func printBuildInfo() {
 	fmt.Printf("Build commit: %s\n", c)
 }
 
-func migrationPaths() ([]string, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, err
-	}
-
-	candidates := make([]string, 0, 3)
-
-	candidates = append(candidates, filepath.Join(cwd, "migrations"))
-
-	exe, err := os.Executable()
-	if err == nil {
-		exeDir := filepath.Dir(exe)
-		candidates = append(candidates,
-			filepath.Join(exeDir, "migrations"),
-			filepath.Clean(filepath.Join(exeDir, "..", "..", "migrations")),
-		)
-	}
-
-	out := make([]string, 0, len(candidates))
-	seen := make(map[string]struct{})
-	for _, d := range candidates {
-		if _, ok := seen[d]; ok {
-			continue
-		}
-		seen[d] = struct{}{}
-
-		st, err := os.Stat(d)
-		if err != nil || !st.IsDir() {
-			continue
-		}
-		out = append(out, d)
-	}
-
-	if len(out) == 0 {
-		return nil, fmt.Errorf("migrations directory not found (tried: %v)", candidates)
-	}
-
-	return out, nil
-}
-
-func runMigrations(db *sql.DB) error {
-	dirs, err := migrationPaths()
-	if err != nil {
-		return fmt.Errorf("migrations: %w", err)
-	}
-
-	files := []string{
-		"0001_create_urls.sql",
-		"0002_unique_original.sql",
-		"0003_create_user_urls.sql",
-		"0004_add_is_deleted.sql",
-	}
-
-	var lastErr error
-	for _, dir := range dirs {
-		ok := true
-		for _, f := range files {
-			p := filepath.Join(dir, f)
-			if err := repository.RunSQLMigration(db, p); err != nil {
-				lastErr = err
-				ok = false
-				break
-			}
-		}
-		if ok {
-			return nil
-		}
-	}
-
-	if lastErr == nil {
-		lastErr = errors.New("no migrations were applied")
-	}
-
-	return fmt.Errorf("migrations: %w", lastErr)
-}
-
 func main() {
 	printBuildInfo()
 
-	var repo repository.URLRepository
-	var db *sql.DB
-	var observers []audit.Observer
+	if err := run(); err != nil {
+		slog.Error("application failed", "error", err)
+		os.Exit(1)
+	}
+}
 
+func run() error {
 	cfg := config.Parse()
-	logger := logrus.New()
-	logger.SetLevel(logrus.InfoLevel)
+	logger := slog.Default()
 
+	var (
+		repo service.URLRepository
+		db   *sql.DB
+	)
+
+	observers := make([]audit.Observer, 0, 2)
 	if cfg.AuditFile != "" {
-		observers = append(observers, audit.NewFileObserver(cfg.AuditFile))
+		fileObserver, err := audit.NewFileObserver(cfg.AuditFile)
+		if err != nil {
+			return fmt.Errorf("audit file observer: %w", err)
+		}
+		observers = append(observers, fileObserver)
 	}
 	if cfg.AuditURL != "" {
 		observers = append(observers, audit.NewHTTPObserver(cfg.AuditURL))
 	}
 	auditor := audit.NewNotifier(observers...)
+	defer func() {
+		if err := auditor.Close(); err != nil {
+			logger.Error("audit shutdown failed", "error", err)
+		}
+	}()
 
 	if cfg.DatabaseDSN != "" {
-		d, err := sql.Open("postgres", cfg.DatabaseDSN)
-		if err != nil {
-			log.Fatalf("db open: %v", err)
-		}
-		db = d
-
-		if err := runMigrations(db); err != nil {
-			log.Fatal(err)
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		dbCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		if err := db.PingContext(ctx); err != nil {
-			log.Printf("db ping failed: %v", err)
+
+		postgresDB, postgresRepo, err := repository.NewPostgresStorage(dbCtx, cfg.DatabaseDSN)
+		if err != nil {
+			return err
 		}
 
-		repo = repository.NewPostgresRepository(db)
-
+		db = postgresDB
+		defer func() {
+			if err := db.Close(); err != nil {
+				logger.Error("database close failed", "error", err)
+			}
+		}()
+		repo = postgresRepo
 	} else if cfg.FileStoragePath != "" {
 		fileRepo, err := repository.NewFileRepository(cfg.FileStoragePath)
 		if err != nil {
-			log.Fatalf("file repository: %v", err)
+			return fmt.Errorf("file repository: %w", err)
 		}
 		repo = fileRepo
 	} else {
@@ -180,70 +119,167 @@ func main() {
 	}
 
 	svc := service.NewShortener(repo)
-	svc.StartDeleteWorker(128, 500*time.Millisecond)
-	router := handler.NewRouter(svc, cfg.BaseURL, logger, db, auditor, cfg.TrustedSubnet)
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	waitDeleteWorker := svc.StartDeleteWorker(workerCtx, 128, 500*time.Millisecond, func(err error) {
+		logger.Error("delete worker failed", "error", err)
+	})
+	defer func() {
+		workerCancel()
+		waitDeleteWorker()
+	}()
 
-	grpcLis, err := net.Listen("tcp", cfg.GRPCAddr)
+	router := handler.NewRouter(svc, cfg.BaseURL, logger, db, auditor, cfg.TrustedSubnet)
+	httpSrv := &http.Server{Addr: cfg.ServerAddr, Handler: router}
+
+	grpcListener, err := net.Listen("tcp", cfg.GRPCAddr)
 	if err != nil {
-		log.Fatalf("grpc listen: %v", err)
+		return fmt.Errorf("listen gRPC: %w", err)
 	}
+	defer grpcListener.Close()
+
 	grpcSrv := grpc.NewServer()
 	shortenerv1.RegisterShortenerServiceServer(grpcSrv, grpcserver.New(svc, cfg.BaseURL))
 
+	httpErr := make(chan error, 1)
+	grpcErr := make(chan error, 1)
 	go func() {
-		log.Printf("grpc listening on %s\n", cfg.GRPCAddr)
-		if err := grpcSrv.Serve(grpcLis); err != nil {
-			log.Printf("grpc serve: %v", err)
+		logger.Info("HTTP server listening", "addr", cfg.ServerAddr, "https", cfg.EnableHTTPS)
+		httpErr <- serveHTTP(httpSrv, cfg)
+	}()
+	go func() {
+		logger.Info("gRPC server listening", "addr", cfg.GRPCAddr)
+		if err := grpcSrv.Serve(grpcListener); err != nil && err != grpc.ErrServerStopped {
+			grpcErr <- err
+			return
 		}
+		grpcErr <- nil
 	}()
 
-	srv := &http.Server{
-		Addr:    cfg.ServerAddr,
-		Handler: router,
-	}
+	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
+	defer stop()
 
-	srvErr := make(chan error, 1)
-	go func() {
-		var err error
-		if cfg.EnableHTTPS {
-			const certFile = "server.crt"
-			const keyFile = "server.key"
-			log.Printf("listening (https) on https://%s\n", cfg.ServerAddr)
-			err = srv.ListenAndServeTLS(certFile, keyFile)
-		} else {
-			log.Printf("listening on http://%s\n", cfg.ServerAddr)
-			err = srv.ListenAndServe()
-		}
-		srvErr <- err
-	}()
-
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	var runErr error
 	select {
-	case sig := <-stop:
-		log.Printf("shutdown signal: %v\n", sig)
-	case err := <-srvErr:
-		if err != nil && err != http.ErrServerClosed {
-			log.Fatalf("server error: %v", err)
+	case <-signalCtx.Done():
+	case err := <-httpErr:
+		if err != nil {
+			runErr = fmt.Errorf("serve HTTP: %w", err)
+		}
+	case err := <-grpcErr:
+		if err != nil {
+			runErr = fmt.Errorf("serve gRPC: %w", err)
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_ = srv.Shutdown(ctx)
-
-	err = <-srvErr
-	if err != nil && err != http.ErrServerClosed {
-		log.Printf("server error after shutdown: %v", err)
+	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+		logger.Error("HTTP shutdown failed", "error", err)
+		if runErr == nil {
+			runErr = fmt.Errorf("shutdown HTTP: %w", err)
+		}
 	}
 
-	grpcSrv.GracefulStop()
-	_ = grpcLis.Close()
-
-	if db != nil {
-		_ = db.Close()
+	grpcDone := make(chan struct{})
+	go func() {
+		grpcSrv.GracefulStop()
+		close(grpcDone)
+	}()
+	select {
+	case <-grpcDone:
+	case <-shutdownCtx.Done():
+		grpcSrv.Stop()
+		if runErr == nil {
+			runErr = fmt.Errorf("shutdown gRPC: %w", shutdownCtx.Err())
+		}
 	}
 
-	log.Println("shutdown")
+	if runErr != nil {
+		return runErr
+	}
+
+	logger.Info("shutdown")
+	return nil
+}
+
+func serveHTTP(srv *http.Server, cfg config.Config) error {
+	if !cfg.EnableHTTPS {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			return err
+		}
+		return nil
+	}
+
+	tlsConfig, err := selfSignedTLSConfig(cfg.ServerAddr)
+	if err != nil {
+		return err
+	}
+
+	ln, err := tls.Listen("tcp", cfg.ServerAddr, tlsConfig)
+	if err != nil {
+		return err
+	}
+
+	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+		return err
+	}
+	return nil
+}
+
+func selfSignedTLSConfig(hostport string) (*tls.Config, error) {
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, fmt.Errorf("generate tls key: %w", err)
+	}
+
+	serialLimit := new(big.Int).Lsh(big.NewInt(1), 128)
+	serial, err := rand.Int(rand.Reader, serialLimit)
+	if err != nil {
+		return nil, fmt.Errorf("generate tls serial: %w", err)
+	}
+
+	notBefore := time.Now().Add(-time.Hour)
+	tmpl := x509.Certificate{
+		SerialNumber: serial,
+		Subject: pkix.Name{
+			Organization: []string{"pip_shortener"},
+		},
+		NotBefore:             notBefore,
+		NotAfter:              notBefore.Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+	}
+
+	host, _, err := net.SplitHostPort(hostport)
+	if err != nil {
+		host = hostport
+	}
+	if host == "" || host == "localhost" {
+		tmpl.DNSNames = append(tmpl.DNSNames, "localhost")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		tmpl.IPAddresses = append(tmpl.IPAddresses, ip)
+	} else if host != "" {
+		tmpl.DNSNames = append(tmpl.DNSNames, host)
+	}
+
+	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &priv.PublicKey, priv)
+	if err != nil {
+		return nil, fmt.Errorf("create tls certificate: %w", err)
+	}
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
+
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return nil, fmt.Errorf("load tls key pair: %w", err)
+	}
+
+	return &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
+	}, nil
 }

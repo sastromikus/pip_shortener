@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -14,7 +15,7 @@ type statsResponse struct {
 	Users int `json:"users"`
 }
 
-func handleInternalStats(svc *service.Shortener, trustedSubnet string, w http.ResponseWriter, r *http.Request) {
+func handleInternalStats(svc *service.Shortener, trustedSubnet string, logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
 	trustedSubnet = strings.TrimSpace(trustedSubnet)
 	if trustedSubnet == "" {
 		w.WriteHeader(http.StatusForbidden)
@@ -34,9 +35,9 @@ func handleInternalStats(svc *service.Shortener, trustedSubnet string, w http.Re
 		return
 	}
 
-	urls, users, err := svc.Stats()
+	urls, users, err := svc.Stats(r.Context())
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		internalServerError(logger, w, "get internal stats", err)
 		return
 	}
 

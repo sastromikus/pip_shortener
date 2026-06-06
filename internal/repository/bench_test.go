@@ -1,14 +1,24 @@
 package repository
 
-import "testing"
+import (
+	"context"
+	"strconv"
+	"testing"
+)
 
-func BenchmarkMemoryRepository_PutGet(b *testing.B) {
+func BenchmarkMemoryRepositoryPutGet(b *testing.B) {
+	b.StopTimer()
 	r := NewMemoryRepository()
-
+	ctx := context.Background()
+	i := 0
+	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		id := "ID" + itoa(i%100000)
-		r.Put(id, "http://example.com")
-		_, _ = r.Get(id)
+	b.StartTimer()
+
+	for b.Loop() {
+		id := "ID" + strconv.Itoa(i%100000)
+		r.Put(id, "http://example.com/"+strconv.Itoa(i))
+		_, _ = r.Get(ctx, id)
+		i++
 	}
 }

@@ -1,6 +1,9 @@
 package repository
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestMemoryRepository_UserURLsAndCounts(t *testing.T) {
 	r := NewMemoryRepository()
@@ -8,27 +11,23 @@ func TestMemoryRepository_UserURLsAndCounts(t *testing.T) {
 	r.Put("A1", "https://a")
 	r.Put("B2", "https://b")
 
-	_ = r.AddUserURL("u1", "A1")
-	_ = r.AddUserURL("u1", "B2")
-	_ = r.AddUserURL("u2", "B2")
+	_ = r.AddUserURL(context.Background(), "u1", "A1")
+	_ = r.AddUserURL(context.Background(), "u1", "B2")
+	_ = r.AddUserURL(context.Background(), "u2", "B2")
 
-	urls, err := r.CountURLs()
+	urls, users, err := r.Stats(context.Background())
 	if err != nil {
-		t.Fatalf("CountURLs: %v", err)
+		t.Fatalf("Stats: %v", err)
 	}
 	if urls != 2 {
 		t.Fatalf("CountURLs: want 2, got %d", urls)
 	}
 
-	users, err := r.CountUsers()
-	if err != nil {
-		t.Fatalf("CountUsers: %v", err)
-	}
 	if users != 2 {
 		t.Fatalf("CountUsers: want 2, got %d", users)
 	}
 
-	list, err := r.ListUserURLs("u1")
+	list, err := r.ListUserURLs(context.Background(), "u1")
 	if err != nil {
 		t.Fatalf("ListUserURLs: %v", err)
 	}

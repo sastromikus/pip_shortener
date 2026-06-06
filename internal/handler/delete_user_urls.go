@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -9,40 +10,43 @@ import (
 	"github.com/sastromikus/pip_shortener/internal/service"
 )
 
-func handleDeleteUserURLs(svc *service.Shortener, w http.ResponseWriter, r *http.Request) {
+func handleDeleteUserURLs(svc *service.Shortener, logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
 	if middleware.BadCookieNoID(r.Context()) {
-		w.WriteHeader(http.StatusUnauthorized)
+		writeStatus(w, http.StatusUnauthorized)
 		return
 	}
 
 	userID, ok := middleware.UserIDFromContext(r.Context())
 	if !ok || strings.TrimSpace(userID) == "" {
-		w.WriteHeader(http.StatusUnauthorized)
+		writeStatus(w, http.StatusUnauthorized)
 		return
 	}
 
 	ct := r.Header.Get("Content-Type")
 	if ct == "" || !strings.HasPrefix(strings.ToLower(ct), "application/json") {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
-	body, err := readBody(r, maxPOSTBody)
+	body, err := readBody(w, r, maxPOSTBody)
 	if err != nil {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
 	var ids []string
 	if err := json.Unmarshal(body, &ids); err != nil {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 	if len(ids) == 0 {
-		badRequest(w)
+		writeStatus(w, http.StatusBadRequest)
 		return
 	}
 
-	svc.EnqueueDelete(userID, ids)
+	if err := svc.EnqueueDelete(userID, ids); err != nil {
+		internalServerError(logger, w, "enqueue delete", err)
+		return
+	}
 	w.WriteHeader(http.StatusAccepted)
 }

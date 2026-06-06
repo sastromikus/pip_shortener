@@ -26,6 +26,43 @@ func withFreshFlags(t *testing.T, args []string, fn func()) {
 	fn()
 }
 
+func clearConfigEnv(t *testing.T) {
+	t.Helper()
+
+	names := []string{
+		envServerAddr,
+		envBaseURL,
+		envFileStoragePath,
+		envDatabaseDSN,
+		envEnableHTTPS,
+		envAuditFile,
+		envAuditURL,
+		envConfigPath,
+		envTrustedSubnet,
+		envGRPCAddr,
+	}
+
+	for _, name := range names {
+		value, existed := os.LookupEnv(name)
+		if err := os.Unsetenv(name); err != nil {
+			t.Fatalf("unset %s: %v", name, err)
+		}
+
+		name := name
+		t.Cleanup(func() {
+			if existed {
+				if err := os.Setenv(name, value); err != nil {
+					t.Errorf("restore %s: %v", name, err)
+				}
+				return
+			}
+			if err := os.Unsetenv(name); err != nil {
+				t.Errorf("clear %s: %v", name, err)
+			}
+		})
+	}
+}
+
 func writeTempConfig(t *testing.T, dir string, content string) string {
 	t.Helper()
 	p := filepath.Join(dir, "config.json")
@@ -36,6 +73,7 @@ func writeTempConfig(t *testing.T, dir string, content string) string {
 }
 
 func TestParse_ConfigFileLowPriority(t *testing.T) {
+	clearConfigEnv(t)
 	dir := t.TempDir()
 	cfgPath := writeTempConfig(t, dir, `{
   "server_address": "localhost:9999",
@@ -70,6 +108,7 @@ func TestParse_ConfigFileLowPriority(t *testing.T) {
 }
 
 func TestParse_EnvOverridesFlagsAndFile(t *testing.T) {
+	clearConfigEnv(t)
 	dir := t.TempDir()
 	cfgPath := writeTempConfig(t, dir, `{
   "server_address": "localhost:1111",
@@ -80,7 +119,7 @@ func TestParse_EnvOverridesFlagsAndFile(t *testing.T) {
 
 	t.Setenv(envConfigPath, cfgPath)
 	t.Setenv(envServerAddr, "localhost:3333")
-	t.Setenv(envEnableHTTPS, "on")
+	t.Setenv(envEnableHTTPS, "true")
 	t.Setenv(envTrustedSubnet, "127.0.0.0/8")
 
 	withFreshFlags(t, []string{"cmd", "-c", "ignored.json", "-a", "localhost:2222", "-t", "192.168.0.0/16"}, func() {
@@ -98,7 +137,8 @@ func TestParse_EnvOverridesFlagsAndFile(t *testing.T) {
 }
 
 func TestParse_EnableHTTPS_ParseEnvBool(t *testing.T) {
-	t.Setenv(envEnableHTTPS, "off")
+	clearConfigEnv(t)
+	t.Setenv(envEnableHTTPS, "false")
 	withFreshFlags(t, []string{"cmd"}, func() {
 		cfg := Parse()
 		if cfg.EnableHTTPS {
