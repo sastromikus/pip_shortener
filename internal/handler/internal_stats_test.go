@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,67 +12,55 @@ import (
 	"github.com/sastromikus/pip_shortener/internal/service"
 )
 
-func TestInternalStats_ForbiddenWhenNoSubnet(t *testing.T) {
+func newStatsRouter(t *testing.T, trustedSubnet string) http.Handler {
+	t.Helper()
+
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
+	return NewRouter(svc, "http://localhost:8080", nil, (*sql.DB)(nil), nil, trustedSubnet)
+}
 
-	req := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/internal/stats", nil)
+func TestInternalStats_ForbiddenWhenNoSubnet(t *testing.T) {
+	router := newStatsRouter(t, "")
+	req := httptest.NewRequest(http.MethodGet, "/api/internal/stats", nil)
 	req.Header.Set("X-Real-IP", "127.0.0.1")
 	w := httptest.NewRecorder()
 
-	handleInternalStats(svc, "", nil, w, req)
+	router.ServeHTTP(w, req)
 
-	res := w.Result()
-	res.Body.Close()
-
-	if res.StatusCode != http.StatusForbidden {
-		t.Fatalf("want 403, got %d", res.StatusCode)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("want 403, got %d", w.Code)
 	}
 }
 
 func TestInternalStats_ForbiddenWhenBadCIDR(t *testing.T) {
-	repo := repository.NewMemoryRepository()
-	svc := service.NewShortener(repo)
-
-	req := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/internal/stats", nil)
+	router := newStatsRouter(t, "not-a-cidr")
+	req := httptest.NewRequest(http.MethodGet, "/api/internal/stats", nil)
 	req.Header.Set("X-Real-IP", "127.0.0.1")
 	w := httptest.NewRecorder()
 
-	handleInternalStats(svc, "not-a-cidr", nil, w, req)
+	router.ServeHTTP(w, req)
 
-	res := w.Result()
-	res.Body.Close()
-
-	if res.StatusCode != http.StatusForbidden {
-		t.Fatalf("want 403, got %d", res.StatusCode)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("want 403, got %d", w.Code)
 	}
 }
 
 func TestInternalStats_ForbiddenWhenIPMissingOrOutside(t *testing.T) {
-	repo := repository.NewMemoryRepository()
-	svc := service.NewShortener(repo)
+	router := newStatsRouter(t, "127.0.0.0/8")
 
-	req := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/internal/stats", nil)
-	w := httptest.NewRecorder()
-	handleInternalStats(svc, "127.0.0.0/8", nil, w, req)
+	for _, ip := range []string{"", "10.1.2.3"} {
+		req := httptest.NewRequest(http.MethodGet, "/api/internal/stats", nil)
+		if ip != "" {
+			req.Header.Set("X-Real-IP", ip)
+		}
+		w := httptest.NewRecorder()
 
-	res := w.Result()
-	res.Body.Close()
+		router.ServeHTTP(w, req)
 
-	if res.StatusCode != http.StatusForbidden {
-		t.Fatalf("missing ip: want 403, got %d", res.StatusCode)
-	}
-
-	req2 := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/internal/stats", nil)
-	req2.Header.Set("X-Real-IP", "10.1.2.3")
-	w2 := httptest.NewRecorder()
-	handleInternalStats(svc, "127.0.0.0/8", nil, w2, req2)
-
-	res2 := w2.Result()
-	res2.Body.Close()
-
-	if res2.StatusCode != http.StatusForbidden {
-		t.Fatalf("outside subnet: want 403, got %d", res2.StatusCode)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("ip %q: want 403, got %d", ip, w.Code)
+		}
 	}
 }
 
@@ -86,27 +75,21 @@ func TestInternalStats_OKReturnsJSONCounts(t *testing.T) {
 	_, _, _ = svc.ShortenForUserContext(context.Background(), "https://example.com/b", "u1")
 	_, _, _ = svc.ShortenForUserContext(context.Background(), "https://example.com/c", "u2")
 
-	req := httptest.NewRequest(http.MethodGet, "http://localhost:8080/api/internal/stats", nil)
+	router := NewRouter(svc, "http://localhost:8080", nil, nil, nil, "127.0.0.0/8")
+	req := httptest.NewRequest(http.MethodGet, "/api/internal/stats", nil)
 	req.Header.Set("X-Real-IP", "127.0.0.1")
 	w := httptest.NewRecorder()
 
-	handleInternalStats(svc, "127.0.0.0/8", nil, w, req)
+	router.ServeHTTP(w, req)
 
-	res := w.Result()
-	defer res.Body.Close()
-
-	if res.StatusCode != http.StatusOK {
-		t.Fatalf("want 200, got %d", res.StatusCode)
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d", w.Code)
 	}
 
-	var out struct {
-		URLs  int `json:"urls"`
-		Users int `json:"users"`
-	}
-	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+	var out statsResponse
+	if err := json.NewDecoder(w.Body).Decode(&out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-
 	if out.URLs != 3 {
 		t.Fatalf("urls: want 3, got %d", out.URLs)
 	}

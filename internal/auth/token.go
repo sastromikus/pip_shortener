@@ -12,11 +12,11 @@ const defaultSecret = "dev-secret"
 
 // Secret returns the shared secret used by both HTTP cookies and gRPC metadata.
 func Secret() []byte {
-	secret := []byte(os.Getenv("COOKIE_SECRET"))
-	if len(secret) == 0 {
-		secret = []byte(defaultSecret)
+	value, ok := os.LookupEnv("COOKIE_SECRET")
+	if !ok || value == "" {
+		value = defaultSecret
 	}
-	return secret
+	return []byte(value)
 }
 
 // Sign creates a signed user token in the form userID:hex(HMAC-SHA256(userID)).

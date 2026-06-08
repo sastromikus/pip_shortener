@@ -15,26 +15,21 @@ type statsResponse struct {
 	Users int `json:"users"`
 }
 
-func handleInternalStats(svc *service.Shortener, trustedSubnet string, logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
-	trustedSubnet = strings.TrimSpace(trustedSubnet)
-	if trustedSubnet == "" {
-		w.WriteHeader(http.StatusForbidden)
-		return
-	}
+func trustedSubnetOnly(cidr *net.IPNet) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ip := net.ParseIP(strings.TrimSpace(r.Header.Get("X-Real-IP")))
+			if ip == nil || cidr == nil || !cidr.Contains(ip) {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
 
-	_, cidr, err := net.ParseCIDR(trustedSubnet)
-	if err != nil || cidr == nil {
-		w.WriteHeader(http.StatusForbidden)
-		return
+			next.ServeHTTP(w, r)
+		})
 	}
+}
 
-	ipStr := strings.TrimSpace(r.Header.Get("X-Real-IP"))
-	ip := net.ParseIP(ipStr)
-	if ip == nil || !cidr.Contains(ip) {
-		w.WriteHeader(http.StatusForbidden)
-		return
-	}
-
+func handleInternalStats(svc *service.Shortener, logger *slog.Logger, w http.ResponseWriter, r *http.Request) {
 	urls, users, err := svc.Stats(r.Context())
 	if err != nil {
 		internalServerError(logger, w, "get internal stats", err)

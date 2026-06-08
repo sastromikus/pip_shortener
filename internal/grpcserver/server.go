@@ -8,7 +8,6 @@ import (
 	"github.com/sastromikus/pip_shortener/internal/service"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 // Server implements the URL shortener gRPC service.
@@ -47,14 +46,15 @@ func (s *Server) ShortenURL(ctx context.Context, req *shortenerv1.URLShortenRequ
 		return nil, status.Error(codes.Internal, "cannot shorten URL")
 	}
 
-	return &shortenerv1.URLShortenResponse{Result: s.baseURL + "/" + id}, nil
+	return shortenerv1.URLShortenResponse_builder{
+		Result: s.baseURL + "/" + id,
+	}.Build(), nil
 }
 
 // ExpandURL resolves a short identifier to its original URL.
+// It intentionally mirrors the public HTTP GET /{id} endpoint and therefore
+// does not require authorization metadata.
 func (s *Server) ExpandURL(ctx context.Context, req *shortenerv1.URLExpandRequest) (*shortenerv1.URLExpandResponse, error) {
-	if _, ok := UserIDFromAuthMeta(ctx); !ok {
-		return nil, status.Error(codes.Unauthenticated, "missing or invalid authorization")
-	}
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "request is required")
 	}
@@ -72,11 +72,13 @@ func (s *Server) ExpandURL(ctx context.Context, req *shortenerv1.URLExpandReques
 		return nil, status.Error(codes.FailedPrecondition, "short URL was deleted")
 	}
 
-	return &shortenerv1.URLExpandResponse{Result: original}, nil
+	return shortenerv1.URLExpandResponse_builder{
+		Result: original,
+	}.Build(), nil
 }
 
 // ListUserURLs returns all URLs created by the authenticated user.
-func (s *Server) ListUserURLs(ctx context.Context, _ *emptypb.Empty) (*shortenerv1.UserURLsResponse, error) {
+func (s *Server) ListUserURLs(ctx context.Context, _ *shortenerv1.UserURLsRequest) (*shortenerv1.UserURLsResponse, error) {
 	userID, ok := UserIDFromAuthMeta(ctx)
 	if !ok {
 		return nil, status.Error(codes.Unauthenticated, "missing or invalid authorization")
@@ -87,13 +89,15 @@ func (s *Server) ListUserURLs(ctx context.Context, _ *emptypb.Empty) (*shortener
 		return nil, status.Error(codes.Internal, "cannot list user URLs")
 	}
 
-	out := make([]*shortenerv1.URLData, 0, len(items))
+	urls := make([]*shortenerv1.URLData, 0, len(items))
 	for _, item := range items {
-		out = append(out, &shortenerv1.URLData{
+		urls = append(urls, shortenerv1.URLData_builder{
 			ShortUrl:    s.baseURL + "/" + item.ShortID,
 			OriginalUrl: item.Original,
-		})
+		}.Build())
 	}
 
-	return &shortenerv1.UserURLsResponse{Url: out}, nil
+	return shortenerv1.UserURLsResponse_builder{
+		Url: urls,
+	}.Build(), nil
 }

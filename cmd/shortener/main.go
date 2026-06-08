@@ -9,6 +9,7 @@ import (
 	"crypto/x509/pkix"
 	"database/sql"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -29,6 +30,7 @@ import (
 	"github.com/sastromikus/pip_shortener/internal/repository"
 	"github.com/sastromikus/pip_shortener/internal/service"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 var buildVersion string
@@ -131,20 +133,33 @@ func run() error {
 	router := handler.NewRouter(svc, cfg.BaseURL, logger, db, auditor, cfg.TrustedSubnet)
 	httpSrv := &http.Server{Addr: cfg.ServerAddr, Handler: router}
 
+	var tlsConfig *tls.Config
+	if cfg.EnableHTTPS {
+		var err error
+		tlsConfig, err = selfSignedTLSConfig(cfg.ServerAddr)
+		if err != nil {
+			return fmt.Errorf("create TLS config: %w", err)
+		}
+	}
+
 	grpcListener, err := net.Listen("tcp", cfg.GRPCAddr)
 	if err != nil {
 		return fmt.Errorf("listen gRPC: %w", err)
 	}
 	defer grpcListener.Close()
 
-	grpcSrv := grpc.NewServer()
+	grpcOptions := make([]grpc.ServerOption, 0, 1)
+	if tlsConfig != nil {
+		grpcOptions = append(grpcOptions, grpc.Creds(credentials.NewTLS(tlsConfig.Clone())))
+	}
+	grpcSrv := grpc.NewServer(grpcOptions...)
 	shortenerv1.RegisterShortenerServiceServer(grpcSrv, grpcserver.New(svc, cfg.BaseURL))
 
 	httpErr := make(chan error, 1)
 	grpcErr := make(chan error, 1)
 	go func() {
 		logger.Info("HTTP server listening", "addr", cfg.ServerAddr, "https", cfg.EnableHTTPS)
-		httpErr <- serveHTTP(httpSrv, cfg)
+		httpErr <- serveHTTP(httpSrv, cfg, tlsConfig)
 	}()
 	go func() {
 		logger.Info("gRPC server listening", "addr", cfg.GRPCAddr)
@@ -203,7 +218,7 @@ func run() error {
 	return nil
 }
 
-func serveHTTP(srv *http.Server, cfg config.Config) error {
+func serveHTTP(srv *http.Server, cfg config.Config, tlsConfig *tls.Config) error {
 	if !cfg.EnableHTTPS {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			return err
@@ -211,12 +226,11 @@ func serveHTTP(srv *http.Server, cfg config.Config) error {
 		return nil
 	}
 
-	tlsConfig, err := selfSignedTLSConfig(cfg.ServerAddr)
-	if err != nil {
-		return err
+	if tlsConfig == nil {
+		return errors.New("TLS is enabled but TLS config is nil")
 	}
 
-	ln, err := tls.Listen("tcp", cfg.ServerAddr, tlsConfig)
+	ln, err := tls.Listen("tcp", cfg.ServerAddr, tlsConfig.Clone())
 	if err != nil {
 		return err
 	}
