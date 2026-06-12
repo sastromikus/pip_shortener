@@ -9,7 +9,7 @@ on:
 jobs:
   statictest:
     runs-on: ubuntu-latest
-    container: golang:1.24
+    container: golang:1.26
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
@@ -18,7 +18,7 @@ jobs:
         uses: robinraju/release-downloader@v1.8
         with:
           repository: Yandex-Practicum/go-autotests
-          latest: true
+          tag: v0.13.4
           fileName: statictest
           out-file-path: .tools
           token: ${{ secrets.GITHUB_TOKEN }}
