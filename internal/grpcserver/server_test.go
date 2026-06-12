@@ -14,17 +14,21 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func newTestServer() *Server {
+func newTestServer(t *testing.T) *Server {
+	t.Helper()
+
 	return New(service.NewShortener(repository.NewMemoryRepository()), "http://localhost:8080")
 }
 
-func authorizedContext(userID string) context.Context {
+func authorizedContext(t *testing.T, userID string) context.Context {
+	t.Helper()
+
 	token := sharedauth.Sign(userID, sharedauth.Secret())
 	return metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", token))
 }
 
 func TestServerShortenURLRequiresAuthorization(t *testing.T) {
-	server := newTestServer()
+	server := newTestServer(t)
 	req := shortenerv1.URLShortenRequest_builder{
 		Url: "https://example.com",
 	}.Build()
@@ -36,12 +40,12 @@ func TestServerShortenURLRequiresAuthorization(t *testing.T) {
 }
 
 func TestServerShortenAndExpandURL(t *testing.T) {
-	server := newTestServer()
+	server := newTestServer(t)
 	shortenReq := shortenerv1.URLShortenRequest_builder{
 		Url: "https://example.com/path",
 	}.Build()
 
-	shortenResp, err := server.ShortenURL(authorizedContext("user-1"), shortenReq)
+	shortenResp, err := server.ShortenURL(authorizedContext(t, "user-1"), shortenReq)
 	if err != nil {
 		t.Fatalf("ShortenURL: %v", err)
 	}
@@ -63,8 +67,8 @@ func TestServerShortenAndExpandURL(t *testing.T) {
 }
 
 func TestServerListUserURLs(t *testing.T) {
-	server := newTestServer()
-	ctx := authorizedContext("user-1")
+	server := newTestServer(t)
+	ctx := authorizedContext(t, "user-1")
 	request := shortenerv1.UserURLsRequest_builder{}.Build()
 
 	empty, err := server.ListUserURLs(ctx, request)
