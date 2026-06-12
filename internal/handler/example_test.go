@@ -19,7 +19,7 @@ func Example_postTextPlain() {
 	svc := service.NewShortener(repo)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	h := handler.NewRouter(svc, "http://example", logger, nil, nil)
+	h := handler.NewRouter(svc, "http://example", logger, nil, nil, "")
 	ts := httptest.NewServer(h)
 	defer ts.Close()
 
@@ -56,7 +56,7 @@ func Example_postJSON() {
 	svc := service.NewShortener(repo)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	h := handler.NewRouter(svc, "http://example", logger, nil, nil)
+	h := handler.NewRouter(svc, "http://example", logger, nil, nil, "")
 	ts := httptest.NewServer(h)
 	defer ts.Close()
 

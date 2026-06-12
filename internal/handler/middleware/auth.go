@@ -2,14 +2,13 @@ package middleware
 
 import (
 	"context"
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
-	"os"
 	"strings"
 	"time"
+
+	sharedauth "github.com/sastromikus/pip_shortener/internal/auth"
 )
 
 const (
@@ -41,10 +40,7 @@ func BadCookieNoID(ctx context.Context) bool {
 
 // Auth ensures a signed user_id cookie exists and stores user id in request context.
 func Auth() func(http.Handler) http.Handler {
-	secret := []byte(os.Getenv("COOKIE_SECRET"))
-	if len(secret) == 0 {
-		secret = []byte("dev-secret")
-	}
+	secret := sharedauth.Secret()
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -90,27 +86,11 @@ func buildCookie(uid string, secret []byte) *http.Cookie {
 }
 
 func signCookie(uid string, secret []byte) string {
-	mac := hmac.New(sha256.New, secret)
-	_, _ = mac.Write([]byte(uid))
-	sig := hex.EncodeToString(mac.Sum(nil))
-
-	return uid + ":" + sig
+	return sharedauth.Sign(uid, secret)
 }
 
 func verifyCookie(val string, secret []byte) (string, bool) {
-	parts := strings.Split(val, ":")
-	if len(parts) != 2 {
-		return "", false
-	}
-	uid := parts[0]
-	sig := parts[1]
-	if uid == "" || sig == "" {
-		return "", false
-	}
-
-	want := signCookie(uid, secret)
-
-	return uid, hmac.Equal([]byte(want), []byte(uid+":"+sig))
+	return sharedauth.Verify(val, secret)
 }
 
 func newUserID() string {

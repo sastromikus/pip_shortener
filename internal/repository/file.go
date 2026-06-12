@@ -305,3 +305,8 @@ func writeJSONAtomic(path string, v any) error {
 	}
 	return os.Rename(tmp, path)
 }
+
+// Stats returns the number of stored URLs and users with at least one URL.
+func (r *FileRepository) Stats(ctx context.Context) (int, int, error) {
+	return r.mem.Stats(ctx)
+}

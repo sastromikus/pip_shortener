@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -19,7 +20,7 @@ import (
 const maxPOSTBody = 8 << 10
 
 // NewRouter builds the HTTP router with all application handlers and middleware.
-func NewRouter(svc *service.Shortener, baseURL string, logger *slog.Logger, db *sql.DB, auditor *audit.Notifier) http.Handler {
+func NewRouter(svc *service.Shortener, baseURL string, logger *slog.Logger, db *sql.DB, auditor *audit.Notifier, trustedSubnet string) http.Handler {
 	baseURL = strings.TrimRight(baseURL, "/")
 
 	r := chi.NewRouter()
@@ -48,6 +49,20 @@ func NewRouter(svc *service.Shortener, baseURL string, logger *slog.Logger, db *
 	r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
 		handlePing(db, w, r)
 	})
+	trustedSubnet = strings.TrimSpace(trustedSubnet)
+	if trustedSubnet == "" {
+		r.Get("/api/internal/stats", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+		})
+	} else if _, cidr, err := net.ParseCIDR(trustedSubnet); err == nil && cidr != nil {
+		r.With(trustedSubnetOnly(cidr)).Get("/api/internal/stats", func(w http.ResponseWriter, r *http.Request) {
+			handleInternalStats(svc, logger, w, r)
+		})
+	} else {
+		r.Get("/api/internal/stats", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+		})
+	}
 	r.Get("/{id}", func(w http.ResponseWriter, r *http.Request) {
 		handleRedirect(svc, chi.URLParam(r, "id"), logger, w, r, auditor)
 	})

@@ -9,6 +9,7 @@ import (
 	"crypto/x509/pkix"
 	"database/sql"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -21,11 +22,15 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	shortenerv1 "github.com/sastromikus/pip_shortener/api/grpc"
 	"github.com/sastromikus/pip_shortener/internal/audit"
 	"github.com/sastromikus/pip_shortener/internal/config"
+	"github.com/sastromikus/pip_shortener/internal/grpcserver"
 	"github.com/sastromikus/pip_shortener/internal/handler"
 	"github.com/sastromikus/pip_shortener/internal/repository"
 	"github.com/sastromikus/pip_shortener/internal/service"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 var buildVersion string
@@ -99,8 +104,11 @@ func run() error {
 		}
 
 		db = postgresDB
-		defer db.Close()
-
+		defer func() {
+			if err := db.Close(); err != nil {
+				logger.Error("database close failed", "error", err)
+			}
+		}()
 		repo = postgresRepo
 	} else if cfg.FileStoragePath != "" {
 		fileRepo, err := repository.NewFileRepository(cfg.FileStoragePath)
@@ -113,47 +121,94 @@ func run() error {
 	}
 
 	svc := service.NewShortener(repo)
-
 	workerCtx, workerCancel := context.WithCancel(context.Background())
-	defer workerCancel()
-
 	waitDeleteWorker := svc.StartDeleteWorker(workerCtx, 128, 500*time.Millisecond, func(err error) {
 		logger.Error("delete worker failed", "error", err)
 	})
-
-	router := handler.NewRouter(svc, cfg.BaseURL, logger, db, auditor)
-
-	srv := &http.Server{
-		Addr:    cfg.ServerAddr,
-		Handler: router,
-	}
-
-	serverErr := make(chan error, 1)
-	go func() {
-		logger.Info("listening", "addr", cfg.ServerAddr, "https", cfg.EnableHTTPS)
-		serverErr <- serveHTTP(srv, cfg)
+	defer func() {
+		workerCancel()
+		waitDeleteWorker()
 	}()
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
+	router := handler.NewRouter(svc, cfg.BaseURL, logger, db, auditor, cfg.TrustedSubnet)
+	httpSrv := &http.Server{Addr: cfg.ServerAddr, Handler: router}
+
+	var tlsConfig *tls.Config
+	if cfg.EnableHTTPS {
+		var err error
+		tlsConfig, err = selfSignedTLSConfig(cfg.ServerAddr)
+		if err != nil {
+			return fmt.Errorf("create TLS config: %w", err)
+		}
+	}
+
+	grpcListener, err := net.Listen("tcp", cfg.GRPCAddr)
+	if err != nil {
+		return fmt.Errorf("listen gRPC: %w", err)
+	}
+	defer grpcListener.Close()
+
+	grpcOptions := make([]grpc.ServerOption, 0, 1)
+	if tlsConfig != nil {
+		grpcOptions = append(grpcOptions, grpc.Creds(credentials.NewTLS(tlsConfig.Clone())))
+	}
+	grpcSrv := grpc.NewServer(grpcOptions...)
+	shortenerv1.RegisterShortenerServiceServer(grpcSrv, grpcserver.New(svc, cfg.BaseURL))
+
+	httpErr := make(chan error, 1)
+	grpcErr := make(chan error, 1)
+	go func() {
+		logger.Info("HTTP server listening", "addr", cfg.ServerAddr, "https", cfg.EnableHTTPS)
+		httpErr <- serveHTTP(httpSrv, cfg, tlsConfig)
+	}()
+	go func() {
+		logger.Info("gRPC server listening", "addr", cfg.GRPCAddr)
+		if err := grpcSrv.Serve(grpcListener); err != nil && err != grpc.ErrServerStopped {
+			grpcErr <- err
+			return
+		}
+		grpcErr <- nil
+	}()
+
+	signalCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
 
 	var runErr error
 	select {
-	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		runErr = srv.Shutdown(shutdownCtx)
-		cancel()
-		if runErr != nil {
-			logger.Error("server shutdown error", "error", runErr)
-		}
-	case err := <-serverErr:
+	case <-signalCtx.Done():
+	case err := <-httpErr:
 		if err != nil {
 			runErr = fmt.Errorf("serve HTTP: %w", err)
 		}
+	case err := <-grpcErr:
+		if err != nil {
+			runErr = fmt.Errorf("serve gRPC: %w", err)
+		}
 	}
 
-	workerCancel()
-	waitDeleteWorker()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+		logger.Error("HTTP shutdown failed", "error", err)
+		if runErr == nil {
+			runErr = fmt.Errorf("shutdown HTTP: %w", err)
+		}
+	}
+
+	grpcDone := make(chan struct{})
+	go func() {
+		grpcSrv.GracefulStop()
+		close(grpcDone)
+	}()
+	select {
+	case <-grpcDone:
+	case <-shutdownCtx.Done():
+		grpcSrv.Stop()
+		if runErr == nil {
+			runErr = fmt.Errorf("shutdown gRPC: %w", shutdownCtx.Err())
+		}
+	}
 
 	if runErr != nil {
 		return runErr
@@ -163,7 +218,7 @@ func run() error {
 	return nil
 }
 
-func serveHTTP(srv *http.Server, cfg config.Config) error {
+func serveHTTP(srv *http.Server, cfg config.Config, tlsConfig *tls.Config) error {
 	if !cfg.EnableHTTPS {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			return err
@@ -171,12 +226,11 @@ func serveHTTP(srv *http.Server, cfg config.Config) error {
 		return nil
 	}
 
-	tlsConfig, err := selfSignedTLSConfig(cfg.ServerAddr)
-	if err != nil {
-		return err
+	if tlsConfig == nil {
+		return errors.New("TLS is enabled but TLS config is nil")
 	}
 
-	ln, err := tls.Listen("tcp", cfg.ServerAddr, tlsConfig)
+	ln, err := tls.Listen("tcp", cfg.ServerAddr, tlsConfig.Clone())
 	if err != nil {
 		return err
 	}

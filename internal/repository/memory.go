@@ -259,3 +259,11 @@ func (r *MemoryRepository) LoadDeleted(id string) {
 		r.deleted[id] = true
 	}
 }
+
+// Stats returns the number of stored URLs and users with at least one URL.
+func (r *MemoryRepository) Stats(_ context.Context) (int, int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return len(r.data), len(r.user), nil
+}

@@ -47,6 +47,7 @@ type URLRepository interface {
 	AddUserURLs(ctx context.Context, userID string, shortIDs []string) error
 	ListUserURLs(ctx context.Context, userID string) ([]model.UserURL, error)
 	MarkDeleted(ctx context.Context, userID string, ids []string) error
+	Stats(ctx context.Context) (urls int, users int, err error)
 }
 
 // BatchItem describes one batch shortening request.
@@ -202,6 +203,16 @@ func (s *Shortener) ListUserURLs(ctx context.Context, userID string) ([]model.Us
 	}
 
 	return s.repo.ListUserURLs(ctx, userID)
+}
+
+// Stats returns total URL and user counts.
+func (s *Shortener) Stats(ctx context.Context) (int, int, error) {
+	urls, users, err := s.repo.Stats(ctx)
+	if err != nil {
+		return 0, 0, fmt.Errorf("%w: %w", ErrStorage, err)
+	}
+
+	return urls, users, nil
 }
 
 // EnqueueDelete queues an asynchronous delete request.

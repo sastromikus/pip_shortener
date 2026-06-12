@@ -3,6 +3,7 @@ package audit
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -30,6 +31,8 @@ type Notifier struct {
 	observers []Observer
 	queue     chan Event
 	wg        sync.WaitGroup
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // NewNotifier creates a Notifier with the provided observers.
@@ -90,28 +93,31 @@ func (n *Notifier) Close() error {
 		return nil
 	}
 
-	close(n.queue)
-	n.wg.Wait()
+	n.closeOnce.Do(func() {
+		close(n.queue)
+		n.wg.Wait()
 
-	var firstErr error
-	for _, obs := range n.observers {
-		closer, ok := obs.(interface{ Close() error })
-		if !ok {
-			continue
+		for _, obs := range n.observers {
+			closer, ok := obs.(interface{ Close() error })
+			if !ok {
+				continue
+			}
+			if err := closer.Close(); err != nil && n.closeErr == nil {
+				n.closeErr = err
+			}
 		}
-		if err := closer.Close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
+	})
 
-	return firstErr
+	return n.closeErr
 }
 
 func (n *Notifier) run() {
 	defer n.wg.Done()
 	for e := range n.queue {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_ = n.notifyAll(ctx, e)
+		if err := n.notifyAll(ctx, e); err != nil {
+			slog.Error("audit delivery failed", "error", err)
+		}
 		cancel()
 	}
 }

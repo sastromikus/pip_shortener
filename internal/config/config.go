@@ -16,6 +16,8 @@ type Config struct {
 	DatabaseDSN     string
 	AuditFile       string
 	AuditURL        string
+	TrustedSubnet   string
+	GRPCAddr        string
 	EnableHTTPS     bool
 }
 
@@ -23,6 +25,7 @@ const (
 	defaultServerAddr      = "localhost:8080"
 	defaultBaseURL         = "http://localhost:8080"
 	defaultFileStoragePath = "storage.json"
+	defaultGRPCAddr        = "localhost:3200"
 
 	envServerAddr      = "SERVER_ADDRESS"
 	envBaseURL         = "BASE_URL"
@@ -32,6 +35,8 @@ const (
 	envAuditFile       = "AUDIT_FILE"
 	envAuditURL        = "AUDIT_URL"
 	envConfigPath      = "CONFIG"
+	envTrustedSubnet   = "TRUSTED_SUBNET"
+	envGRPCAddr        = "GRPC_ADDRESS"
 )
 
 type fileConfig struct {
@@ -42,6 +47,8 @@ type fileConfig struct {
 	EnableHTTPS     *bool  `json:"enable_https"`
 	AuditFile       string `json:"audit_file"`
 	AuditURL        string `json:"audit_url"`
+	TrustedSubnet   string `json:"trusted_subnet"`
+	GRPCAddr        string `json:"grpc_address"`
 }
 
 // Parse reads configuration and applies priority: environment variables > flags > config file > defaults.
@@ -50,6 +57,7 @@ func Parse() Config {
 		ServerAddr:      defaultServerAddr,
 		BaseURL:         defaultBaseURL,
 		FileStoragePath: defaultFileStoragePath,
+		GRPCAddr:        defaultGRPCAddr,
 	}
 
 	var flagAddr string
@@ -59,6 +67,8 @@ func Parse() Config {
 	var flagAuditFile string
 	var flagAuditURL string
 	var flagConfig string
+	var flagTrustedSubnet string
+	var flagGRPCAddr string
 	var flagHTTPS bool
 
 	flag.StringVar(&flagAddr, "a", "", "HTTP server address")
@@ -70,6 +80,9 @@ func Parse() Config {
 	flag.StringVar(&flagAuditFile, "audit-file", "", "Audit log file path")
 	flag.StringVar(&flagAuditURL, "audit-url", "", "Audit receiver URL")
 	flag.BoolVar(&flagHTTPS, "s", false, "Enable HTTPS")
+	flag.StringVar(&flagTrustedSubnet, "t", "", "Trusted subnet CIDR")
+	flag.StringVar(&flagGRPCAddr, "g", "", "gRPC server address")
+	flag.StringVar(&flagGRPCAddr, "grpc-address", "", "gRPC server address")
 	flag.StringVar(&flagConfig, "c", "", "Config file path")
 	flag.StringVar(&flagConfig, "config", "", "Config file path")
 	flag.Parse()
@@ -106,6 +119,12 @@ func Parse() Config {
 	if flagsSet["s"] {
 		cfg.EnableHTTPS = flagHTTPS
 	}
+	if flagsSet["t"] {
+		cfg.TrustedSubnet = flagTrustedSubnet
+	}
+	if flagsSet["g"] || flagsSet["grpc-address"] {
+		cfg.GRPCAddr = flagGRPCAddr
+	}
 
 	if v, ok := os.LookupEnv(envServerAddr); ok {
 		cfg.ServerAddr = v
@@ -129,6 +148,12 @@ func Parse() Config {
 		if enableHTTPS, err := strconv.ParseBool(v); err == nil {
 			cfg.EnableHTTPS = enableHTTPS
 		}
+	}
+	if v, ok := os.LookupEnv(envTrustedSubnet); ok {
+		cfg.TrustedSubnet = v
+	}
+	if v, ok := os.LookupEnv(envGRPCAddr); ok {
+		cfg.GRPCAddr = v
 	}
 
 	return cfg
@@ -181,5 +206,11 @@ func applyFileConfig(cfg *Config, fc fileConfig) {
 	}
 	if fc.EnableHTTPS != nil {
 		cfg.EnableHTTPS = *fc.EnableHTTPS
+	}
+	if fc.TrustedSubnet != "" {
+		cfg.TrustedSubnet = fc.TrustedSubnet
+	}
+	if fc.GRPCAddr != "" {
+		cfg.GRPCAddr = fc.GRPCAddr
 	}
 }

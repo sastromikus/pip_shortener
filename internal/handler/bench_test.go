@@ -21,7 +21,7 @@ func BenchmarkPOSTShortenTextPlain(b *testing.B) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil)
+	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil, "")
 
 	u := mustURL("http://localhost:8080/")
 	body := []byte("http://example.com/path")
@@ -49,7 +49,7 @@ func BenchmarkPOSTAPIShortenJSON(b *testing.B) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewShortener(repo)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil)
+	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil, "")
 
 	u := mustURL("http://localhost:8080/api/shorten")
 	payload := []byte(`{"url":"https://practicum.yandex.ru/"}`)
@@ -79,7 +79,7 @@ func BenchmarkGETFollow(b *testing.B) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	repo.Put("TESTID12", "https://example.com/path")
-	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil)
+	h := NewRouter(svc, "http://localhost:8080", logger, nil, nil, "")
 
 	u := mustURL("http://localhost:8080/TESTID12")
 	cookie := validUserCookie("bench")
